@@ -1,5 +1,12 @@
 import type { Goal, GoalEntry } from '../types/goal';
-import { addDays, formatShortDate, getWeekStart, parseDateString } from '../utils/date';
+import {
+  addDays,
+  formatShortDate,
+  parseDateString,
+  toDateString,
+} from '../utils/date';
+import type { WeekStart } from './settingsApi';
+import { endOfWeek, startOfWeek, weekdayName } from './week';
 import { calculateStreak, longestStreak, metWeekStreak } from '../utils/streak';
 import { entriesOnOrBefore, periodTotalAsOf } from './asOfDate';
 import {
@@ -11,7 +18,7 @@ import {
   isRepeating,
   isTracked,
   periodTotal,
-  weeklyTarget,
+  weekTargetFor,
 } from './goalTree';
 
 export type AnalysisTone = 'good' | 'warn' | 'neutral';
@@ -46,13 +53,17 @@ function dayWord(count: number): string {
   return count === 1 ? 'day' : 'days';
 }
 
+function dateKey(date: Date): string {
+  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 function hasChildren(node: Goal, nodes: Goal[]): boolean {
   return (buildChildrenMap(nodes).get(node.id)?.length ?? 0) > 0;
 }
 
-function recentWeekStarts(node: Goal, today: string): string[] {
-  const current = getWeekStart(today);
-  const startWeek = getWeekStart(goalStartDate(node));
+function recentWeekStarts(node: Goal, today: string, weekStartsOn: WeekStart): string[] {
+  const current = startOfWeek(today, weekStartsOn);
+  const startWeek = startOfWeek(goalStartDate(node), weekStartsOn);
   const firstCandidate = addDays(current, -7 * (WEEK_WINDOW - 1));
   const first = firstCandidate < startWeek ? startWeek : firstCandidate;
   const weeks: string[] = [];
@@ -63,16 +74,21 @@ function recentWeekStarts(node: Goal, today: string): string[] {
 }
 
 /** Mean of weekly completion over the last six weeks, as a whole percent. */
-function sixWeekAverage(node: Goal, entries: GoalEntry[], today: string): number | null {
+function sixWeekAverage(
+  node: Goal,
+  entries: GoalEntry[],
+  today: string,
+  weekStartsOn: WeekStart,
+): number | null {
   const visible = entriesOnOrBefore(entries, today);
   let sum = 0;
   let count = 0;
-  for (const week of recentWeekStarts(node, today)) {
-    const target = weeklyTarget(node, week);
+  for (const week of recentWeekStarts(node, today, weekStartsOn)) {
+    const { target } = weekTargetFor(node, week, weekStartsOn);
     if (target == null || target <= 0) {
       continue;
     }
-    sum += periodTotal(node, visible, week) / target;
+    sum += periodTotal(node, visible, week, weekStartsOn) / target;
     count += 1;
   }
   if (count === 0) {
@@ -98,26 +114,34 @@ function weeklyAnalysis(
   node: Goal,
   entries: GoalEntry[],
   today: string,
+  weekStartsOn: WeekStart,
 ): GoalAnalysis | null {
-  const weekStart = getWeekStart(today);
-  const target = weeklyTarget(node, weekStart);
+  const weekStart = startOfWeek(today, weekStartsOn);
+  const { target, availableDays } = weekTargetFor(node, weekStart, weekStartsOn);
   if (target == null || target <= 0) {
     return null;
   }
 
-  const total = periodTotalAsOf(node, entries, today);
-  const stats = progressDetail(node, total, target, sixWeekAverage(node, entries, today));
+  const total = periodTotalAsOf(node, entries, today, weekStartsOn);
+  const stats = progressDetail(
+    node,
+    total,
+    target,
+    sixWeekAverage(node, entries, today, weekStartsOn),
+  );
   if (total >= target) {
     return { headline: 'Week complete', detail: stats, tone: 'good' };
   }
 
-  const daysElapsed = daysBetween(weekStart, today) + 1;
-  if (total >= (target * daysElapsed) / 7) {
+  const span = availableDays.length;
+  const elapsed = availableDays.filter((day) => dateKey(day) <= today).length;
+  const expected = span > 0 ? (target * elapsed) / span : 0;
+  if (total >= expected) {
     return { headline: 'On pace this week', detail: stats, tone: 'good' };
   }
 
   const remaining = target - total;
-  const daysLeft = daysBetween(today, addDays(weekStart, 6)) + 1;
+  const daysLeft = availableDays.filter((day) => dateKey(day) >= today).length;
   const cantFinish = !isTracked(node) && remaining > daysLeft;
   if (cantFinish) {
     return { headline: "Can't finish this week", detail: stats, tone: 'warn' };
@@ -125,7 +149,7 @@ function weeklyAnalysis(
 
   return {
     headline: 'Behind this week',
-    detail: `Needs ${formatQty(remaining)} more by Saturday · ${stats}`,
+    detail: `Needs ${formatQty(remaining)} more by ${weekdayName(endOfWeek(today, weekStartsOn))} · ${stats}`,
     tone: 'warn',
   };
 }
@@ -171,6 +195,7 @@ export function goalAnalysis(
   nodes: Goal[],
   entries: GoalEntry[],
   today: string,
+  weekStartsOn: WeekStart,
 ): GoalAnalysis | null {
   if (hasChildren(node, nodes)) {
     return null;
@@ -181,7 +206,7 @@ export function goalAnalysis(
     if (node.repeatPeriod === 'month') {
       return null;
     }
-    return weeklyAnalysis(node, entries, day);
+    return weeklyAnalysis(node, entries, day, weekStartsOn);
   }
 
   return oneTimeAnalysis(node, day);
@@ -190,14 +215,17 @@ export function goalAnalysis(
 function weekWasMet(
   node: Goal,
   entries: GoalEntry[],
-  weekStart: string,
+  weekOf: string,
   today: string,
+  weekStartsOn: WeekStart,
 ): boolean {
-  const target = weeklyTarget(node, weekStart);
+  const { target } = weekTargetFor(node, weekOf, weekStartsOn);
   if (target == null || target <= 0) {
     return false;
   }
-  return periodTotal(node, entriesOnOrBefore(entries, today), weekStart) >= target;
+  return (
+    periodTotal(node, entriesOnOrBefore(entries, today), weekOf, weekStartsOn) >= target
+  );
 }
 
 /** Current and best streak for a repeating step. Null when it does not repeat. */
@@ -205,6 +233,7 @@ export function goalStreaks(
   node: Goal,
   entries: GoalEntry[],
   today: string,
+  weekStartsOn: WeekStart,
 ): GoalStreaks | null {
   if (!isRepeating(node)) {
     return null;
@@ -221,11 +250,11 @@ export function goalStreaks(
     };
   }
 
-  const startWeek = getWeekStart(start);
-  const currentWeek = getWeekStart(day);
+  const startWeek = startOfWeek(start, weekStartsOn);
+  const currentWeek = startOfWeek(day, weekStartsOn);
   const met: boolean[] = [];
   for (let week = startWeek; week <= currentWeek; week = addDays(week, 7)) {
-    met.push(weekWasMet(node, entries, week, day));
+    met.push(weekWasMet(node, entries, week, day, weekStartsOn));
   }
   const streak = metWeekStreak(met);
   return { current: streak.current, best: streak.best, unit: 'week' };

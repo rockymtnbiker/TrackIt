@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, type NavigationProp } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -13,7 +13,10 @@ import {
 import Svg, { Circle, Path } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import { entriesOnOrBefore, periodTotalAsOf, weeklyTarget } from '../lib/asOfDate';
+import { useSettings } from '../context/SettingsContext';
+import type { WeekStart } from '../lib/settingsApi';
+import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
+import { entriesOnOrBefore, periodTotalAsOf } from '../lib/asOfDate';
 import {
   bigDealSummary,
   goalAnalysis,
@@ -28,6 +31,7 @@ import {
   isTracked,
   paceInfo,
   rollupTotal,
+  weekTargetFor,
 } from '../lib/goalTree';
 import {
   getAtRiskItems,
@@ -43,9 +47,7 @@ import {
   addDays,
   formatDateMDY,
   formatShortDate,
-  getWeekDays,
   getWeekday,
-  getWeekStart,
   parseDateString,
   toDateString,
   todayDateString,
@@ -167,8 +169,6 @@ function WeekTiles({
   );
 }
 
-const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
 const TONE_COLOR: Record<AnalysisTone, string> = {
   good: '#248A3D',
   warn: '#C2410C',
@@ -181,12 +181,15 @@ function DaysActiveCard({
   weekStart,
   today,
   activeDates,
+  weekStartsOn,
 }: {
   weekStart: string;
   today: string;
   activeDates: ReadonlySet<string>;
+  weekStartsOn: WeekStart;
 }) {
-  const days = DAY_LETTERS.map((letter, index) => {
+  const days = weekdayLabels(weekStartsOn).map((label, index) => {
+    const letter = label.slice(0, 1);
     const date = addDays(weekStart, index);
     const future = date > today;
     return {
@@ -378,10 +381,11 @@ function winsThisWeek(
   entries: GoalEntry[],
   today: string,
   weekStart: string,
+  weekStartsOn: WeekStart,
 ): WinRow[] {
   const childrenMap = buildChildrenMap(nodes);
   const byId = new Map(nodes.map((node) => [node.id, node]));
-  const weekEnd = addDays(weekStart, 6);
+  const weekEnd = endOfWeek(weekStart, weekStartsOn);
   const wins: WinRow[] = [];
 
   const parentTitle = (goal: Goal): string | null => {
@@ -413,11 +417,11 @@ function winsThisWeek(
     if (!isRepeating(goal)) {
       continue;
     }
-    const target = weeklyTarget(goal, weekStart);
+    const { target } = weekTargetFor(goal, weekStart, weekStartsOn);
     if (target == null || target <= 0) {
       continue;
     }
-    const total = periodTotalAsOf(goal, entries, today);
+    const total = periodTotalAsOf(goal, entries, today, weekStartsOn);
     if (total < target) {
       continue;
     }
@@ -435,7 +439,7 @@ function winsThisWeek(
     if (!isRepeating(goal)) {
       continue;
     }
-    const streak = goalStreaks(goal, entries, today);
+    const streak = goalStreaks(goal, entries, today, weekStartsOn);
     if (streak == null || streak.current < 3) {
       continue;
     }
@@ -463,17 +467,27 @@ function FlameMark() {
   );
 }
 
+function dateKey(date: Date): string {
+  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 function WeekDots({
   goal,
   entries,
   asOf,
+  weekStartsOn,
 }: {
   goal: Goal;
   entries: GoalEntry[];
   asOf: string;
+  weekStartsOn: WeekStart;
 }) {
-  const days = getWeekDays(asOf);
+  const days = weekDays(asOf, weekStartsOn);
   const start = goalStartDate(goal);
+  const startWeek = startOfWeek(start, weekStartsOn);
+  const available = new Set(
+    weekTargetFor(goal, asOf, weekStartsOn).availableDays.map(dateKey),
+  );
   const logged = new Set(
     entries
       .filter((entry) => {
@@ -486,14 +500,26 @@ function WeekDots({
   return (
     <View style={styles.weekDots} pointerEvents="none">
       {days.map((day) => {
-        if (day.dateString < start) {
-          return <View key={day.dateString} style={styles.weekDotSlot} />;
+        if (startOfWeek(day, weekStartsOn) < startWeek) {
+          return <View key={day} style={styles.weekDotSlot} />;
         }
-        const selected = day.dateString === asOf;
-        const after = day.dateString > asOf;
-        const hasEntry = logged.has(day.dateString);
+        if (!available.has(day)) {
+          return (
+            <View
+              key={day}
+              style={styles.weekDotSlot}
+              accessible={false}
+              accessibilityState={{ disabled: true }}
+            >
+              <View style={[styles.weekDot, styles.weekDotDisabled]} />
+            </View>
+          );
+        }
+        const selected = day === asOf;
+        const after = day > asOf;
+        const hasEntry = logged.has(day);
         return (
-          <View key={day.dateString} style={styles.weekDotSlot}>
+          <View key={day} style={styles.weekDotSlot}>
             {selected ? <View style={styles.weekDotRing} /> : null}
             <View
               style={[
@@ -528,10 +554,10 @@ function attentionWarn(detail: string): boolean {
   );
 }
 
-function defaultReviewWeek(today: string): string {
-  const current = getWeekStart(today);
-  const weekday = parseDateString(today).getDay();
-  return weekday === 0 || weekday === 1 ? addDays(current, -7) : current;
+function defaultReviewWeek(today: string, weekStartsOn: WeekStart): string {
+  const current = startOfWeek(today, weekStartsOn);
+  const offset = weekDays(today, weekStartsOn).indexOf(today);
+  return offset <= 1 ? addDays(current, -7) : current;
 }
 
 function reviewWeekTitle(viewed: string, current: string): string {
@@ -550,6 +576,7 @@ function missedThisWeek(
   entries: GoalEntry[],
   asOf: string,
   weekStart: string,
+  weekStartsOn: WeekStart,
 ): AtRiskItem[] {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const missed: AtRiskItem[] = [];
@@ -563,9 +590,9 @@ function missedThisWeek(
     }
     let detail = 'Missed';
     if (isRepeating(goal)) {
-      const target = weeklyTarget(goal, weekStart);
+      const { target } = weekTargetFor(goal, weekStart, weekStartsOn);
       if (target != null && target > 0) {
-        const total = periodTotalAsOf(goal, entries, asOf);
+        const total = periodTotalAsOf(goal, entries, asOf, weekStartsOn);
         detail = `Missed: ${formatQty(total)} of ${formatQty(target)}`;
       }
     }
@@ -581,6 +608,8 @@ function missedThisWeek(
 
 export default function DashboardScreen({ navigation }: Props) {
   const { signOut } = useAuth();
+  const { settings } = useSettings();
+  const weekStartsOn = settings.weekStart;
   const [signingOut, setSigningOut] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -590,7 +619,9 @@ export default function DashboardScreen({ navigation }: Props) {
   const [activityEntries, setActivityEntries] = useState<GoalEntry[]>([]);
   const [completedOpen, setCompletedOpen] = useState(false);
   const [period, setPeriod] = useState<DashboardPeriod>('weekly');
-  const [viewedWeek, setViewedWeek] = useState(() => defaultReviewWeek(todayDateString()));
+  const [viewedWeek, setViewedWeek] = useState(() =>
+    defaultReviewWeek(todayDateString(), weekStartsOn),
+  );
 
   const loadDashboard = useCallback(async () => {
     setLoadError(null);
@@ -612,8 +643,8 @@ export default function DashboardScreen({ navigation }: Props) {
         }
       }
 
-      const weekStart = getWeekStart(today);
-      const weekEnd = addDays(weekStart, 6);
+      const weekStart = startOfWeek(today, weekStartsOn);
+      const weekEnd = endOfWeek(today, weekStartsOn);
       const periodEnd = weekEnd > monthEnd(today) ? weekEnd : monthEnd(today);
       const from = addDays(today, -STREAK_LOOKBACK_DAYS);
       let earliestDay = today;
@@ -623,7 +654,7 @@ export default function DashboardScreen({ navigation }: Props) {
           earliestDay = start;
         }
       }
-      const historyStart = getWeekStart(earliestDay);
+      const historyStart = startOfWeek(earliestDay, weekStartsOn);
       const reviewFromCandidate = addDays(weekStart, -52 * 7);
       const reviewFrom =
         historyStart < reviewFromCandidate ? historyStart : reviewFromCandidate;
@@ -665,7 +696,7 @@ export default function DashboardScreen({ navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [weekStartsOn]);
 
   useFocusEffect(
     useCallback(() => {
@@ -683,7 +714,7 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   const today = todayDateString();
-  const currentWeek = getWeekStart(today);
+  const currentWeek = startOfWeek(today, weekStartsOn);
   const earliestWeek = useMemo(() => {
     if (nodes.length === 0) {
       return currentWeek;
@@ -695,30 +726,37 @@ export default function DashboardScreen({ navigation }: Props) {
         earliest = start;
       }
     }
-    const week = getWeekStart(earliest);
+    const week = startOfWeek(earliest, weekStartsOn);
     return week > currentWeek ? currentWeek : week;
-  }, [nodes, today, currentWeek]);
+  }, [nodes, today, currentWeek, weekStartsOn]);
   const weekStart =
     viewedWeek < earliestWeek ? earliestWeek : viewedWeek > currentWeek ? currentWeek : viewedWeek;
-  const asOf = weekStart === currentWeek ? today : addDays(weekStart, 6);
+  const asOf = weekStart === currentWeek ? today : endOfWeek(weekStart, weekStartsOn);
   const canGoPrevious = weekStart > earliestWeek;
   const canGoNext = weekStart < currentWeek;
-  const weekRange = `${formatShortDate(weekStart)} – ${formatShortDate(addDays(weekStart, 6))}`;
+  const weekRange = `${formatShortDate(weekStart)} – ${formatShortDate(endOfWeek(weekStart, weekStartsOn))}`;
 
+  const appliedWeekStart = useRef(weekStartsOn);
   useEffect(() => {
+    if (appliedWeekStart.current !== weekStartsOn) {
+      appliedWeekStart.current = weekStartsOn;
+      setViewedWeek(defaultReviewWeek(todayDateString(), weekStartsOn));
+      return;
+    }
     if (loading) {
       return;
     }
     setViewedWeek((current) => {
-      if (current < earliestWeek) {
+      const aligned = startOfWeek(current, weekStartsOn);
+      if (aligned < earliestWeek) {
         return earliestWeek;
       }
-      if (current > currentWeek) {
+      if (aligned > currentWeek) {
         return currentWeek;
       }
-      return current;
+      return aligned;
     });
-  }, [loading, earliestWeek, currentWeek]);
+  }, [loading, earliestWeek, currentWeek, weekStartsOn]);
 
   const displayEntries = useMemo(
     () => mergeEntries([entries, reviewEntries, activityEntries]),
@@ -735,8 +773,9 @@ export default function DashboardScreen({ navigation }: Props) {
         reviewEntries,
         parseDateString(weekStart),
         parseDateString(asOf),
+        weekStartsOn,
       ),
-    [nodes, reviewEntries, weekStart, asOf],
+    [nodes, reviewEntries, weekStart, asOf, weekStartsOn],
   );
   const childrenMap = useMemo(() => buildChildrenMap(nodes), [nodes]);
   const activeGoals = useMemo(
@@ -765,22 +804,29 @@ export default function DashboardScreen({ navigation }: Props) {
   const weekDelta = useMemo(() => {
     const viewedAsOf = parseDateString(asOf);
     const priorAsOf = parseDateString(addDays(asOf, -7));
-    const thisWeek = getWeeklyItems(nodes, reviewEntries, parseDateString(weekStart), viewedAsOf);
+    const thisWeek = getWeeklyItems(
+      nodes,
+      reviewEntries,
+      parseDateString(weekStart),
+      viewedAsOf,
+      weekStartsOn,
+    );
     const lastWeek = getWeeklyItems(
       nodes,
       reviewEntries,
       parseDateString(addDays(weekStart, -7)),
       priorAsOf,
+      weekStartsOn,
     );
     return thisWeek.donePct - lastWeek.donePct;
-  }, [nodes, reviewEntries, weekStart, asOf]);
+  }, [nodes, reviewEntries, weekStart, asOf, weekStartsOn]);
   const weekStreak = useMemo(
-    () => getWeekStreak(nodes, reviewEntries, parseDateString(asOf)),
-    [nodes, reviewEntries, asOf],
+    () => getWeekStreak(nodes, reviewEntries, parseDateString(asOf), weekStartsOn),
+    [nodes, reviewEntries, asOf, weekStartsOn],
   );
   const activeDates = useMemo(() => {
     const dates = new Set<string>();
-    const weekEnd = addDays(weekStart, 6);
+    const weekEnd = endOfWeek(weekStart, weekStartsOn);
     for (const entry of activityEntries) {
       const date = entry.entryDate.slice(0, 10);
       if (date >= weekStart && date <= asOf && date <= weekEnd) {
@@ -797,17 +843,17 @@ export default function DashboardScreen({ navigation }: Props) {
       }
     }
     return dates;
-  }, [activityEntries, nodes, weekStart, asOf]);
+  }, [activityEntries, nodes, weekStart, asOf, weekStartsOn]);
   const atRiskItems = useMemo(
     () =>
       weekStart === currentWeek
-        ? getAtRiskItems(nodes, reviewEntries, parseDateString(today))
-        : missedThisWeek(review, nodes, displayEntries, asOf, weekStart),
-    [weekStart, currentWeek, nodes, reviewEntries, today, review, displayEntries, asOf],
+        ? getAtRiskItems(nodes, reviewEntries, parseDateString(today), weekStartsOn)
+        : missedThisWeek(review, nodes, displayEntries, asOf, weekStart, weekStartsOn),
+    [weekStart, currentWeek, nodes, reviewEntries, today, review, displayEntries, asOf, weekStartsOn],
   );
   const weekWins = useMemo(
-    () => winsThisWeek(nodes, displayEntries, asOf, weekStart),
-    [nodes, displayEntries, asOf, weekStart],
+    () => winsThisWeek(nodes, displayEntries, asOf, weekStart, weekStartsOn),
+    [nodes, displayEntries, asOf, weekStart, weekStartsOn],
   );
   const doneGoals = useMemo(
     () =>
@@ -938,7 +984,12 @@ export default function DashboardScreen({ navigation }: Props) {
               weekDelta={weekDelta}
               weekStreak={weekStreak}
             />
-            <DaysActiveCard weekStart={weekStart} today={today} activeDates={activeDates} />
+            <DaysActiveCard
+              weekStart={weekStart}
+              today={today}
+              activeDates={activeDates}
+              weekStartsOn={weekStartsOn}
+            />
             <View style={styles.weeklyCard}>
               <Text style={styles.weeklyCardTitle}>Wins this week</Text>
               {weekWins.length === 0 ? (
@@ -989,18 +1040,18 @@ export default function DashboardScreen({ navigation }: Props) {
               {activeGoals.length > 0 ? (
                 activeGoals.map((goal, index) => {
                   const analysis =
-                    goalAnalysis(goal, nodes, displayEntries, asOf) ??
+                    goalAnalysis(goal, nodes, displayEntries, asOf, weekStartsOn) ??
                     bigDealSummary(goal, nodes, asOf);
                   const children = childrenMap.get(goal.id) ?? [];
                   const showDots = isRepeating(goal);
                   const showBar = !showDots && (children.length > 0 || isTracked(goal));
                   const barTarget = isRepeating(goal)
-                    ? weeklyTarget(goal, weekStart)
+                    ? weekTargetFor(goal, weekStart, weekStartsOn).target
                     : goal.targetAmount;
                   const barTotal = children.length > 0
                     ? null
                     : isRepeating(goal)
-                      ? periodTotalAsOf(goal, displayEntries, asOf)
+                      ? periodTotalAsOf(goal, displayEntries, asOf, weekStartsOn)
                       : (rollupTotal(goal, nodes, asOfEntries) ?? 0);
                   const deal = children.length > 0 ? bigDealSummary(goal, nodes, asOf) : null;
                   const percent = deal
@@ -1037,7 +1088,12 @@ export default function DashboardScreen({ navigation }: Props) {
                       </View>
                       <View style={styles.allGoalTrailing}>
                         {showDots ? (
-                          <WeekDots goal={goal} entries={asOfEntries} asOf={asOf} />
+                          <WeekDots
+                            goal={goal}
+                            entries={asOfEntries}
+                            asOf={asOf}
+                            weekStartsOn={weekStartsOn}
+                          />
                         ) : null}
                         {showBar ? <ThinBar percent={percent} /> : null}
                         <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
@@ -1483,6 +1539,9 @@ const styles = StyleSheet.create({
   },
   weekDotMissed: {
     backgroundColor: '#D1D1D6',
+  },
+  weekDotDisabled: {
+    backgroundColor: '#E5E5EA',
   },
   weekDotHollow: {
     backgroundColor: 'transparent',

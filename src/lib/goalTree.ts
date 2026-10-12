@@ -1,5 +1,7 @@
 import type { GoalEntry, Goal, RepeatPeriod } from '../types/goal';
-import { addDays, getWeekStart, parseDateString, toDateString, todayDateString } from '../utils/date';
+import { parseDateString, toDateString, todayDateString } from '../utils/date';
+import type { WeekStart } from './settingsApi';
+import { endOfWeek, startOfWeek, weekDays } from './week';
 
 export type PeriodRange = {
   start: string;
@@ -11,10 +13,11 @@ function daysInMonth(date: string): number {
   return new Date(parsed.getFullYear(), parsed.getMonth() + 1, 0).getDate();
 }
 
-/** Week is Sunday–Saturday. Month is the calendar month containing the date. */
+/** Week follows the user's week start. Month is the calendar month containing the date. */
 export function getPeriodRange(
   date: string,
   repeatPeriod: RepeatPeriod,
+  weekStartsOn: WeekStart,
 ): PeriodRange {
   const day = date.slice(0, 10);
   if (repeatPeriod === 'month') {
@@ -28,13 +31,19 @@ export function getPeriodRange(
     };
   }
 
-  const start = getWeekStart(day);
-  return { start, end: addDays(start, 6) };
+  return {
+    start: startOfWeek(day, weekStartsOn),
+    end: endOfWeek(day, weekStartsOn),
+  };
 }
 
-/** The period that contains D: Sun–Sat, or the calendar month. */
-export function periodBounds(node: Goal, date: string): PeriodRange {
-  return getPeriodRange(date, node.repeatPeriod ?? 'week');
+/** The period that contains D: the user's week, or the calendar month. */
+export function periodBounds(
+  node: Goal,
+  date: string,
+  weekStartsOn: WeekStart,
+): PeriodRange {
+  return getPeriodRange(date, node.repeatPeriod ?? 'week', weekStartsOn);
 }
 
 const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -60,7 +69,11 @@ export function isDaily(goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit'
  * Monthly stays target × 7 / days in that month.
  * Tracked steps still use target_amount, and return nothing when it is unset.
  */
-export function weeklyTarget(goal: Goal, weekStart?: string): number | null {
+export function weeklyTarget(
+  goal: Goal,
+  weekStartsOn: WeekStart,
+  weekOf?: string,
+): number | null {
   const tracked = goal.unit != null;
   const positive =
     goal.targetAmount != null && goal.targetAmount > 0 ? goal.targetAmount : null;
@@ -69,7 +82,7 @@ export function weeklyTarget(goal: Goal, weekStart?: string): number | null {
     if (goal.targetAmount == null) {
       return null;
     }
-    const anchor = getWeekStart(weekStart?.slice(0, 10) ?? todayDateString());
+    const anchor = startOfWeek(weekOf?.slice(0, 10) ?? todayDateString(), weekStartsOn);
     return (goal.targetAmount * 7) / daysInMonth(anchor);
   }
 
@@ -91,8 +104,9 @@ export function periodTotal(
   node: Goal,
   entries: GoalEntry[],
   date: string,
+  weekStartsOn: WeekStart,
 ): number {
-  const range = periodBounds(node, date);
+  const range = periodBounds(node, date, weekStartsOn);
   const own = entries.filter(
     (entry) =>
       entry.goalId === node.id &&
@@ -112,11 +126,12 @@ export function isPeriodTargetMet(
   node: Goal,
   entries: GoalEntry[],
   date: string,
+  weekStartsOn: WeekStart,
 ): boolean {
   if (node.targetAmount == null) {
     return false;
   }
-  return periodTotal(node, entries, date) >= node.targetAmount;
+  return periodTotal(node, entries, date, weekStartsOn) >= node.targetAmount;
 }
 
 /** Actual start date, or the created date when that is unset. Date only. */
@@ -131,6 +146,70 @@ export function isRepeating(node: Goal): boolean {
 
 export function isTracked(node: Goal): boolean {
   return node.unit !== null;
+}
+
+function weekDayDates(weekOf: string, weekStartsOn: WeekStart): Date[] {
+  return weekDays(weekOf, weekStartsOn).map((day) => parseDateString(day));
+}
+
+function dateKey(date: Date): string {
+  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+export type WeekTarget = {
+  target: number | null;
+  availableDays: Date[];
+};
+
+/**
+ * Target for the user's week that contains weekOf.
+ * In the week of the step's start (actual start, or created date), only days
+ * on or after that start are available. Later and earlier weeks use weeklyTarget
+ * and all seven days.
+ * Daily: target is the available-day count.
+ * Times per week: min(weekly target, available days, and planned days that
+ * still fall on an available day). Planned day numbers stay Sunday = 0.
+ * Amount per week: weekly target scaled by available days / 7, rounded.
+ */
+export function weekTargetFor(
+  goal: Goal,
+  weekOf: string,
+  weekStartsOn: WeekStart,
+): WeekTarget {
+  const week = startOfWeek(weekOf, weekStartsOn);
+  const allDays = weekDayDates(week, weekStartsOn);
+  const start = goalStartDate(goal);
+  if (week !== startOfWeek(start, weekStartsOn)) {
+    return { target: weeklyTarget(goal, weekStartsOn, week), availableDays: allDays };
+  }
+
+  const availableDays = allDays.filter((day) => dateKey(day) >= start);
+  const available = availableDays.length;
+  const full = weeklyTarget(goal, weekStartsOn, week);
+
+  if (isTracked(goal)) {
+    return {
+      target: full == null ? null : Math.round((full * available) / 7),
+      availableDays,
+    };
+  }
+
+  if (isDaily(goal)) {
+    return { target: available, availableDays };
+  }
+
+  if (full == null) {
+    return { target: null, availableDays };
+  }
+
+  let cap = available;
+  if (goal.plannedDays != null && goal.plannedDays.length > 0) {
+    const availableWeekdays = new Set(availableDays.map((day) => day.getDay()));
+    const planned = goal.plannedDays.filter((day) => availableWeekdays.has(day)).length;
+    cap = Math.min(available, planned);
+  }
+
+  return { target: Math.min(full, cap), availableDays };
 }
 
 /**

@@ -1,11 +1,14 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalsListScreen from '../screens/GoalsListScreen';
-import StepDetailScreen from '../screens/StepDetailScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 
 export type GoalsStackParamList = {
   GoalsList: undefined;
   Goal: { goalId: string };
+  Settings: undefined;
+  DeleteAccount: undefined;
   StepDetail: { goalId: string };
 };
 
@@ -23,7 +26,7 @@ export default function GoalsStackNavigator() {
       <Stack.Screen
         name="GoalsList"
         component={GoalsListScreen}
-        options={{ headerShown: false }}
+        options={{ headerShown: false, title: 'Plan', headerBackTitle: 'Plan' }}
       />
       <Stack.Screen
         name="Goal"
@@ -31,9 +34,14 @@ export default function GoalsStackNavigator() {
         options={{ title: '', headerTitleAlign: 'center' }}
       />
       <Stack.Screen
-        name="StepDetail"
-        component={StepDetailScreen}
-        options={{ title: 'Edit goal', headerTitleAlign: 'center' }}
+        name="Settings"
+        component={SettingsScreen}
+        options={{ title: 'Settings', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="DeleteAccount"
+        component={DeleteAccountScreen}
+        options={{ title: 'Delete account', headerTitleAlign: 'center' }}
       />
     </Stack.Navigator>
   );

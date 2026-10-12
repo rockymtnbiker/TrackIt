@@ -82,28 +82,6 @@ export function isItemActiveOnDate(
   return true;
 }
 
-export type WeekDayCell = {
-  dateString: string;
-  weekday: Weekday;
-  dayNumber: number;
-};
-
-/** Returns Sun–Sat date cells for the week containing referenceDate. */
-export function getWeekDays(
-  referenceDate: string = todayDateString(),
-): WeekDayCell[] {
-  const weekStart = getWeekStart(referenceDate);
-
-  return WEEKDAYS.map((weekday, index) => {
-    const dateString = addDays(weekStart, index);
-    return {
-      dateString,
-      weekday,
-      dayNumber: parseDateString(dateString).getDate(),
-    };
-  });
-}
-
 export function formatScheduledDays(scheduledDays: Weekday[]): string {
   return scheduledDays
     .map((day) => WEEKDAY_SHORT_LABELS[day])
@@ -204,22 +182,6 @@ export function parseDateString(dateString: string): Date {
   return new Date(`${dateString}T00:00:00`);
 }
 
-/** Returns the Sunday (start) of the week containing the given date. */
-export function getWeekStart(dateString: string): string {
-  const date = parseDateString(dateString);
-  const dayOfWeek = date.getDay();
-  return addDays(dateString, -dayOfWeek);
-}
-
-export function isDateInWeek(
-  dateString: string,
-  referenceDate: string = todayDateString(),
-): boolean {
-  const weekStart = getWeekStart(referenceDate);
-  const weekEnd = addDays(weekStart, 6);
-  return dateString >= weekStart && dateString <= weekEnd;
-}
-
 export function isDateInMonth(
   dateString: string,
   referenceDate: string = todayDateString(),
@@ -242,14 +204,6 @@ export function weeksInMonth(
     0,
   ).getDate();
   return Math.ceil(daysInMonth / 7);
-}
-
-export function countCompletionsInWeek(
-  completionLog: string[],
-  referenceDate: string = todayDateString(),
-): number {
-  return completionLog.filter((date) => isDateInWeek(date, referenceDate))
-    .length;
 }
 
 export function countCompletionsInMonth(

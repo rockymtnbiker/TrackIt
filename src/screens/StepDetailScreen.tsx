@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useSettings } from '../context/SettingsContext';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Children, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -43,6 +44,7 @@ import {
   paceInfo,
   periodTotal,
   rollupTotal,
+  weekTargetFor,
 } from '../lib/goalTree';
 import {
   buildProgressSeries,
@@ -60,10 +62,10 @@ import type {
   RepeatPeriod,
 } from '../types/goal';
 import { nextGoalStatus } from '../types';
+import { endOfWeek, startOfWeek, weekdayLabels, weekdayOrder } from '../lib/week';
 import {
   addDays,
   dateFromIso,
-  getWeekStart,
   isoFromDate,
   parseDateString,
   todayDateString,
@@ -270,14 +272,16 @@ function MetricsSections({
     setWeekOffset(0);
   }, [node.id]);
 
+  const { settings } = useSettings();
+  const weekStartsOn = settings.weekStart;
   if (node.unit == null || sources.length === 0) {
     return null;
   }
 
   const today = todayDateString();
   const startDate = goalStartDate(node);
-  const currentWeek = getWeekStart(today);
-  const startWeek = getWeekStart(startDate);
+  const currentWeek = startOfWeek(today, weekStartsOn);
+  const startWeek = startOfWeek(startDate, weekStartsOn);
   const historyWeeks =
     startWeek <= currentWeek
       ? Math.round(daysFrom(startWeek, currentWeek) / 7) + 1
@@ -303,21 +307,21 @@ function MetricsSections({
   for (const value of monthAmounts.values()) {
     completed += value;
   }
-  const planned = monthlyPlanned(sources, today, startDate);
+  const planned = monthlyPlanned(sources, today, startDate, weekStartsOn);
   const monthPct = planned > 0 ? Math.round((completed / planned) * 100) : null;
   const monthName = month.toLocaleDateString(undefined, { month: 'long' });
 
   const windowFrom = weeks[0] ?? today;
-  const windowTo = weeks.length > 0 ? addDays(weeks[weeks.length - 1], 6) : today;
+  const windowTo = weeks.length > 0 ? endOfWeek(weeks[weeks.length - 1], weekStartsOn) : today;
   const weekAmounts = dailyAmounts(node, nodes, entries, windowFrom, windowTo);
 
   let amountSum = 0;
   let pctSum = 0;
   const weekRows = weeks.map((weekStart) => {
     const total = weekAmount(weekStart, weekAmounts, startDate, today);
-    const target = weeklyTarget(sources, weekStart);
+    const target = weeklyTarget(sources, weekStart, weekStartsOn);
     const pct = target > 0 ? (total / target) * 100 : null;
-    const weekEnd = addDays(weekStart, 6);
+    const weekEnd = endOfWeek(weekStart, weekStartsOn);
     const met = target > 0 && total >= target;
     const missed = target > 0 && !met && weekEnd < today;
     amountSum += total;
@@ -326,9 +330,14 @@ function MetricsSections({
   });
 
   const includesCurrent = weeks.includes(currentWeek);
+  const currentAvailable = includesCurrent
+    ? weekTargetFor(node, currentWeek, weekStartsOn).availableDays
+    : [];
+  const elapsedAvailable = currentAvailable.filter((day) => isoFromDate(day) <= today).length;
+  const currentWeight =
+    currentAvailable.length > 0 ? elapsedAvailable / currentAvailable.length : 0;
   const divisor = includesCurrent
-    ? weeks.filter((start) => start !== currentWeek).length +
-      Math.min(7, Math.max(0, daysFrom(currentWeek, today) + 1)) / 7
+    ? weeks.filter((start) => start !== currentWeek).length + currentWeight
     : weeks.length;
   const avgAmount = divisor > 0 ? amountSum / divisor : 0;
   const avgPct = divisor > 0 ? pctSum / divisor : 0;
@@ -401,9 +410,9 @@ function MetricsSections({
           </View>
 
           <View style={styles.weekRow}>
-            {DAY_LABELS.map((label, index) => (
+            {weekdayLabels(weekStartsOn).map((label, index) => (
               <View key={`${label}-${index}`} style={styles.dayCell}>
-                <Text style={styles.dayHeaderText}>{label}</Text>
+                <Text style={styles.dayHeaderText}>{label.slice(0, 1)}</Text>
               </View>
             ))}
             <View style={styles.totalCell}>
@@ -416,7 +425,7 @@ function MetricsSections({
 
           {weekRows.map((row) => (
             <View key={row.weekStart} style={styles.weekRow}>
-              {DAY_LABELS.map((_, index) => {
+              {weekdayLabels(weekStartsOn).map((_, index) => {
                 const date = addDays(row.weekStart, index);
                 const blank = date < startDate || date > today;
                 return (
@@ -517,12 +526,13 @@ export function GoalReadout({
   nodes: Goal[];
   entries: GoalEntry[];
 }) {
+  const { settings } = useSettings();
   const displayUnit = node.unit;
   const repeatOn = node.plannedDays !== null;
   const today = todayDateString();
   const total = displayUnit
     ? repeatOn
-      ? periodTotal(node, entries, today)
+      ? periodTotal(node, entries, today, settings.weekStart)
       : (rollupTotal(node, nodes, entries) ?? 0)
     : null;
   const pace =
@@ -607,6 +617,8 @@ export function GoalReadout({
 
 export default function StepDetailScreen({ navigation, route }: Props) {
   const { goalId } = route.params;
+  const { settings } = useSettings();
+  const weekStartsOn = settings.weekStart;
   const [node, setNode] = useState<Goal | null>(null);
   const [allNodes, setAllNodes] = useState<Goal[]>([]);
   const [entries, setEntries] = useState<GoalEntry[]>([]);
@@ -865,7 +877,7 @@ export default function StepDetailScreen({ navigation, route }: Props) {
   const total =
     progressNode && displayUnit
       ? repeatOn
-        ? periodTotal(progressNode, entries, today)
+        ? periodTotal(progressNode, entries, today, weekStartsOn)
         : (rollupTotal(progressNode, allNodes, entries) ?? 0)
       : null;
   const pace =
@@ -1365,7 +1377,8 @@ export default function StepDetailScreen({ navigation, route }: Props) {
               <View style={styles.formStackedBlock}>
                 <Text style={formFieldStyles.formFieldLabel}>Days</Text>
                 <View style={formFieldStyles.dayPicker}>
-                  {DAY_LABELS.map((label, day) => {
+                  {weekdayOrder(weekStartsOn).map((day) => {
+                    const label = DAY_LABELS[day];
                     const selected = plannedDays.includes(day);
                     return (
                       <Pressable

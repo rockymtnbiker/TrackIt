@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,9 @@ import {
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
+import GoalDetailCards from '../components/GoalDetailCards';
+import GoalEditForm, { type GoalEditFormHandle } from '../components/GoalEditForm';
+import { useSettings } from '../context/SettingsContext';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { PendingStatusCircle } from '../components/PendingStatusCircle';
 import {
@@ -31,6 +34,7 @@ import {
   getEntries,
   setGoalStatus,
   upsertEntry,
+  type UpsertedEntry,
 } from '../lib/goalTreeApi';
 import {
   buildChildrenMap,
@@ -39,16 +43,18 @@ import {
   isRepeating,
   isTracked,
   rollupTotal,
+  weekTargetFor,
   weeklyTarget,
 } from '../lib/goalTree';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { Goal, GoalEntry, GoalStatus } from '../types/goal';
+import type { WeekStart } from '../lib/settingsApi';
+import { startOfWeek, weekDays } from '../lib/week';
 import {
   formatDate,
   formatShortDate,
-  getWeekDays,
-  getWeekStart,
   isPastDate,
+  toDateString,
   todayDateString,
 } from '../utils/date';
 import { GoalReadout } from './StepDetailScreen';
@@ -98,14 +104,14 @@ function timesLabel(value: number): string {
   return Number.isInteger(value) ? String(value) : String(value);
 }
 
-function summaryLine(node: Goal): string | null {
+function summaryLine(node: Goal, weekStartsOn: WeekStart): string | null {
   if (isRepeating(node)) {
     const since = formatShortDate(goalStartDate(node));
     if (isDaily(node)) {
       return `Daily · since ${since}`;
     }
     const perMonth = node.repeatPeriod === 'month';
-    const count = perMonth ? node.targetAmount : weeklyTarget(node);
+    const count = perMonth ? node.targetAmount : weeklyTarget(node, weekStartsOn);
     const period = perMonth ? 'month' : 'week';
     if (count == null) {
       return `Since ${since}`;
@@ -150,6 +156,8 @@ function StatusMark({ status }: { status: GoalStatus }) {
 
 export default function GoalScreen({ navigation, route }: Props) {
   const { goalId } = route.params;
+  const { settings } = useSettings();
+  const weekStartsOn = settings.weekStart;
   const today = todayDateString();
   const addRef = useRef<TextInput>(null);
   const [loading, setLoading] = useState(true);
@@ -164,7 +172,13 @@ export default function GoalScreen({ navigation, route }: Props) {
   const [logOpen, setLogOpen] = useState(false);
   const [logAmount, setLogAmount] = useState('');
   const [logError, setLogError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const entryBusy = useRef(false);
+  const editRef = useRef<GoalEditFormHandle>(null);
+  const allowLeaveRef = useRef(false);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -191,25 +205,36 @@ export default function GoalScreen({ navigation, route }: Props) {
     }, [load]),
   );
 
-  const openEdit = useCallback(() => {
-    navigation.push('StepDetail', { goalId });
-  }, [goalId, navigation]);
-
   useLayoutEffect(() => {
     navigation.setOptions({
       title: '',
-      headerRight: () => (
-        <Pressable
-          onPress={openEdit}
-          accessibilityRole="button"
-          accessibilityLabel="Edit"
-          hitSlop={8}
-        >
-          <Text style={styles.headerEdit}>Edit</Text>
-        </Pressable>
-      ),
+      headerRight: () => null,
     });
-  }, [navigation, openEdit]);
+  }, [navigation]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (allowLeaveRef.current) {
+        return;
+      }
+      if (!editingRef.current || !editRef.current?.isDirty()) {
+        return;
+      }
+      event.preventDefault();
+      Alert.alert('Discard changes?', undefined, [
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            allowLeaveRef.current = true;
+            navigation.dispatch(event.data.action);
+          },
+        },
+        { text: 'Keep editing', style: 'cancel' },
+      ]);
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const addStep = () => {
     const trimmed = newTitle.trim();
@@ -267,6 +292,27 @@ export default function GoalScreen({ navigation, route }: Props) {
     });
   };
 
+  const applySavedGoals = (goals: Goal[]) => {
+    if (goals.length === 0) {
+      return;
+    }
+    const byId = new Map(goals.map((goal) => [goal.id, goal]));
+    setNode((current) => (current ? (byId.get(current.id) ?? current) : current));
+    setNodes((current) => current.map((item) => byId.get(item.id) ?? item));
+  };
+
+  const applyUpsert = (saved: UpsertedEntry) => {
+    applySavedGoals(saved.goals);
+    setEntries((current) =>
+      current.map((entry) =>
+        entry.goalId === saved.entry.goalId &&
+        entry.entryDate.slice(0, 10) === saved.entry.entryDate.slice(0, 10)
+          ? saved.entry
+          : entry,
+      ),
+    );
+  };
+
   const toggleToday = (tracked: boolean) => {
     if (!node || entryBusy.current) {
       return;
@@ -279,25 +325,21 @@ export default function GoalScreen({ navigation, route }: Props) {
     const previous = entries;
     if (logged) {
       replaceEntries(node.id, today, undefined);
-    } else if (!tracked) {
+      void deleteEntry(node.id, today)
+        .catch((error) => {
+          console.warn('Failed to update today', error);
+          setEntries(previous);
+        })
+        .finally(() => {
+          entryBusy.current = false;
+        });
+      return;
+    }
+    if (!tracked) {
       replaceEntries(node.id, today, null);
     }
-    const persist = logged
-      ? deleteEntry(node.id, today)
-      : upsertEntry(node.id, today, null);
-    void persist
-      .then((saved) => {
-        if (!logged && saved && typeof saved !== 'boolean') {
-          setEntries((current) =>
-            current.map((entry) =>
-              entry.goalId === saved.goalId &&
-              entry.entryDate.slice(0, 10) === saved.entryDate.slice(0, 10)
-                ? saved
-                : entry,
-            ),
-          );
-        }
-      })
+    void upsertEntry(node.id, today, null)
+      .then(applyUpsert)
       .catch((error) => {
         console.warn('Failed to update today', error);
         setEntries(previous);
@@ -339,16 +381,7 @@ export default function GoalScreen({ navigation, route }: Props) {
     replaceEntries(node.id, today, nextValue);
     closeLog();
     void upsertEntry(node.id, today, nextValue)
-      .then((saved) => {
-        setEntries((current) =>
-          current.map((entry) =>
-            entry.goalId === saved.goalId &&
-            entry.entryDate.slice(0, 10) === saved.entryDate.slice(0, 10)
-              ? saved
-              : entry,
-          ),
-        );
-      })
+      .then(applyUpsert)
       .catch((error) => {
         console.warn('Failed to log amount', error);
         setEntries(previous);
@@ -416,19 +449,42 @@ export default function GoalScreen({ navigation, route }: Props) {
     );
   }
 
+  const saveEdit = async () => {
+    if (!editRef.current || saving) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await editRef.current.save();
+      setNode(updated);
+      setNodes((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setEditing(false);
+      await load();
+    } catch (error) {
+      Alert.alert(
+        'Save failed',
+        error instanceof Error ? error.message : 'Could not save.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const parent =
     node.parentId != null
       ? (nodes.find((item) => item.id === node.parentId) ?? null)
       : null;
-  const line = summaryLine(node);
-  const analysis = goalAnalysis(node, nodes, entries, today);
+  const line = summaryLine(node, weekStartsOn);
+  const analysis = goalAnalysis(node, nodes, entries, today, weekStartsOn);
   const deal = bigDealSummary(node, nodes, today);
   const tree = deal ? stepTree(node, nodes) : [];
   const nextUp =
     deal?.nextUpId != null
       ? (nodes.find((item) => item.id === deal.nextUpId) ?? null)
       : null;
-  const streaks = goalStreaks(node, entries, today);
+  const streaks = goalStreaks(node, entries, today, weekStartsOn);
   const whyText = node.why?.trim() ?? '';
   const loggedToday = entries.some(
     (entry) => entry.goalId === node.id && entry.entryDate.slice(0, 10) === today,
@@ -458,7 +514,7 @@ export default function GoalScreen({ navigation, route }: Props) {
         keyboardDismissMode="interactive"
       >
         <View style={styles.titleBlock}>
-          {parent ? (
+          {!editing && parent ? (
             <Pressable
               onPress={() => navigation.push('Goal', { goalId: parent.id })}
               hitSlop={6}
@@ -470,7 +526,45 @@ export default function GoalScreen({ navigation, route }: Props) {
               </Text>
             </Pressable>
           ) : null}
-          <Text style={styles.title}>{node.title || 'Untitled'}</Text>
+          <View style={styles.titleLine}>
+            <Text style={styles.title}>{node.title || 'Untitled'}</Text>
+            <View style={styles.titleActions}>
+              {editing ? (
+                <>
+                  <Pressable
+                    onPress={() => setEditing(false)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancel"
+                    style={styles.titleAction}
+                  >
+                    <Ionicons name="close" size={26} color="#111" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void saveEdit()}
+                    disabled={saving}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Save"
+                    style={styles.titleAction}
+                  >
+                    <Ionicons name="checkmark" size={28} color="#007aff" />
+                  </Pressable>
+                </>
+              ) : (
+                <Pressable
+                  onPress={() => setEditing(true)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit"
+                  style={styles.titleAction}
+                >
+                  <Ionicons name="pencil" size={22} color="#007aff" />
+                </Pressable>
+              )}
+            </View>
+          </View>
+          {editing ? null : (
           <View style={styles.metaRow}>
             <View style={[styles.pill, styles[`pill_${node.status}`]]}>
               <Text style={[styles.pillText, styles[`pillText_${node.status}`]]}>
@@ -479,9 +573,23 @@ export default function GoalScreen({ navigation, route }: Props) {
             </View>
             {line ? <Text style={styles.metaLine}>{line}</Text> : null}
           </View>
+          )}
         </View>
 
-        {deal ? (
+        {editing ? (
+          <GoalEditForm
+            key={node.id}
+            ref={editRef}
+            goal={node}
+            nodes={nodes}
+            onDeleted={() => {
+              allowLeaveRef.current = true;
+              navigation.goBack();
+            }}
+          />
+        ) : null}
+
+        {!editing && deal ? (
           <View style={styles.analysisCard}>
             <Text style={styles.dealHeadline}>{deal.headline}</Text>
             <Text style={[styles.analysisDetail, { color: TONE_COLOR[deal.tone] }]}>
@@ -516,7 +624,7 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {analysis && isRepeating(node) ? (
+        {!editing && analysis && isRepeating(node) ? (
           <WeeklyAnalysis
             node={node}
             entries={entries}
@@ -537,7 +645,7 @@ export default function GoalScreen({ navigation, route }: Props) {
           />
         ) : null}
 
-        {analysis && !isRepeating(node) ? (
+        {!editing && analysis && !isRepeating(node) ? (
           <View style={styles.analysisCard}>
             <View style={styles.analysisRow}>
               <Pressable
@@ -555,14 +663,14 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {whyText ? (
+        {!editing && whyText ? (
           <View style={styles.paddedCard}>
             <Text style={styles.sectionLabel}>Why it matters</Text>
             <Text style={styles.whyQuote}>{`“${whyText}”`}</Text>
           </View>
         ) : null}
 
-        {streaks ? (
+        {!editing && streaks ? (
           <View style={styles.streakRow}>
             <StreakTile
               label="Current streak"
@@ -573,9 +681,9 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        <GoalReadout node={node} nodes={nodes} entries={entries} />
+        {!editing ? <GoalReadout node={node} nodes={nodes} entries={entries} /> : null}
 
-        {tree.length > 0 ? (
+        {!editing && tree.length > 0 ? (
           <View style={styles.treeCard}>
             {tree.map((row, index) => {
               const item = nodes.find((entry) => entry.id === row.id);
@@ -639,25 +747,17 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {needsSetup ? (
+        {!editing && needsSetup ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Set it up</Text>
-            <SetupRow label="Track an amount" onPress={openEdit} />
-            <SetupRow label="Repeat" onPress={openEdit} />
+            <SetupRow label="Track an amount" onPress={() => setEditing(true)} />
+            <SetupRow label="Repeat" onPress={() => setEditing(true)} />
             <SetupRow label="Add steps" onPress={revealAdd} />
             {showAdd ? addField : null}
           </View>
         ) : null}
 
-        <Pressable
-          onPress={openEdit}
-          style={({ pressed }) => [styles.card, styles.linkRow, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Notes, timeline and settings"
-        >
-          <Text style={styles.linkText}>Notes, timeline & settings</Text>
-          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-        </Pressable>
+        {!editing ? <GoalDetailCards goal={node} /> : null}
       </ScrollView>
 
       <Modal visible={logOpen} animationType="fade" transparent onRequestClose={closeLog}>
@@ -861,6 +961,10 @@ function AnalysisCopy({
   );
 }
 
+function dateKey(date: Date): string {
+  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 function WeekStrip({
   node,
   entries,
@@ -870,7 +974,13 @@ function WeekStrip({
   entries: GoalEntry[];
   today: string;
 }) {
+  const { settings } = useSettings();
+  const weekStartsOn = settings.weekStart;
   const start = goalStartDate(node);
+  const startWeek = startOfWeek(start, weekStartsOn);
+  const available = new Set(
+    weekTargetFor(node, today, weekStartsOn).availableDays.map(dateKey),
+  );
   const logged = new Set(
     entries
       .filter(
@@ -884,15 +994,27 @@ function WeekStrip({
 
   return (
     <View style={styles.weekStrip}>
-      {getWeekDays(today).map((day) => {
-        if (day.dateString < start) {
-          return <View key={day.dateString} style={styles.dotSlot} />;
+      {weekDays(today, weekStartsOn).map((day) => {
+        if (startOfWeek(day, weekStartsOn) < startWeek) {
+          return <View key={day} style={styles.dotSlot} />;
         }
-        const isToday = day.dateString === today;
-        const after = day.dateString > today;
-        const hasEntry = logged.has(day.dateString);
+        if (!available.has(day)) {
+          return (
+            <View
+              key={day}
+              style={styles.dotSlot}
+              accessible={false}
+              accessibilityState={{ disabled: true }}
+            >
+              <View style={[styles.dot, styles.dotDisabled]} />
+            </View>
+          );
+        }
+        const isToday = day === today;
+        const after = day > today;
+        const hasEntry = logged.has(day);
         return (
-          <View key={day.dateString} style={styles.dotSlot}>
+          <View key={day} style={styles.dotSlot}>
             {isToday ? <View style={styles.dotRing} /> : null}
             <View
               style={[
@@ -922,8 +1044,9 @@ function WeeklyAnalysis({
   loggedToday: boolean;
   onPress: () => void;
 }) {
-  const target = weeklyTarget(node, getWeekStart(today));
-  const total = periodTotalAsOf(node, entries, today);
+  const { settings } = useSettings();
+  const { target } = weekTargetFor(node, today, settings.weekStart);
+  const total = periodTotalAsOf(node, entries, today, settings.weekStart);
   return (
     <View style={styles.analysisCard}>
       <View style={styles.analysisRow}>
@@ -961,11 +1084,12 @@ function LeafAmountBar({
   entries: GoalEntry[];
   today: string;
 }) {
+  const { settings } = useSettings();
   if (!isTracked(node) || node.targetAmount == null || node.targetAmount <= 0) {
     return null;
   }
   const total = isRepeating(node)
-    ? periodTotalAsOf(node, entries, today)
+    ? periodTotalAsOf(node, entries, today, settings.weekStart)
     : (rollupTotal(node, nodes, entries) ?? 0);
   const ratio = Math.max(0, Math.min(1, total / node.targetAmount));
   return (
@@ -1034,19 +1158,31 @@ const styles = StyleSheet.create({
     color: '#6b6b70',
     textAlign: 'center',
   },
-  headerEdit: {
-    fontSize: 17,
-    color: '#007aff',
-  },
   titleBlock: {
     gap: 6,
     paddingHorizontal: 4,
+  },
+  titleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  titleActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  titleAction: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   parentTitle: {
     fontSize: 15,
     color: '#6b6b70',
   },
   title: {
+    flex: 1,
     fontSize: 28,
     fontWeight: '700',
     color: '#111',
@@ -1143,16 +1279,6 @@ const styles = StyleSheet.create({
     borderTopColor: '#e5e5ea',
   },
   setupLabel: {
-    fontSize: 17,
-    color: '#111',
-  },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-  },
-  linkText: {
     fontSize: 17,
     color: '#111',
   },
@@ -1285,6 +1411,9 @@ const styles = StyleSheet.create({
   },
   dotMissed: {
     backgroundColor: '#D1D1D6',
+  },
+  dotDisabled: {
+    backgroundColor: '#E5E5EA',
   },
   dotHollow: {
     backgroundColor: 'transparent',

@@ -502,11 +502,74 @@ export async function getEntries(
   return ((data as EntryRow[] | null) ?? []).map(mapRowToEntry);
 }
 
+export type UpsertedEntry = {
+  entry: GoalEntry;
+  /** Pending steps this log activated, including ancestors. Empty when nothing changed. */
+  goals: Goal[];
+};
+
+/** A check-off (no amount) or a positive amount. Zero does not count. */
+function logActivates(value: number | null): boolean {
+  return value == null || value > 0;
+}
+
+/**
+ * Pending → Active for this step and any Pending ancestors.
+ * Sets a missing start date to the logged day, and moves a later start date back.
+ * Done ancestors are left unchanged. Already-active steps are left unchanged.
+ */
+async function activatePendingOnLog(
+  goalId: string,
+  loggedDay: string,
+  userId: string,
+): Promise<Goal[]> {
+  const day = loggedDay.slice(0, 10);
+  const changed: Goal[] = [];
+  let currentId: string | null = goalId;
+  const seen = new Set<string>();
+
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId);
+    const row = await fetchNodeRow(currentId, userId);
+    if (!row) {
+      break;
+    }
+
+    if (row.status === 'pending') {
+      const currentStart = dateOrNull(row.actual_start_date);
+      const nextStart =
+        currentStart == null || currentStart > day ? day : currentStart;
+      const patch: Record<string, string> = { status: 'active' };
+      if (nextStart !== currentStart) {
+        patch.actual_start_date = nextStart;
+      }
+
+      const { data, error } = await supabase
+        .from(GOALS_TABLE)
+        .update(patch)
+        .eq('id', row.id)
+        .eq('user_id', userId)
+        .is('deleted_at', null)
+        .select('*')
+        .single();
+
+      if (error) {
+        throw error;
+      }
+      changed.push(mapRowToNode(data as GoalRow));
+    }
+
+    currentId = row.parent_id;
+  }
+
+  return changed;
+}
+
 export async function upsertEntry(
   goalId: string,
   entryDate: string,
   value: number | null,
-): Promise<GoalEntry> {
+): Promise<UpsertedEntry> {
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from(ENTRIES_TABLE)
@@ -526,7 +589,11 @@ export async function upsertEntry(
     throw error;
   }
 
-  return mapRowToEntry(data as EntryRow);
+  const entry = mapRowToEntry(data as EntryRow);
+  const goals = logActivates(value)
+    ? await activatePendingOnLog(goalId, entry.entryDate, userId)
+    : [];
+  return { entry, goals };
 }
 
 export async function deleteEntry(

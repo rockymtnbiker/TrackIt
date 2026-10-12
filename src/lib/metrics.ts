@@ -1,6 +1,12 @@
 import type { GoalEntry, Goal } from '../types/goal';
 import { addDays, parseDateString, toDateString } from '../utils/date';
-import { buildChildrenMap, isRepeating, weeklyTarget as goalWeeklyTarget } from './goalTree';
+import {
+  buildChildrenMap,
+  isRepeating,
+  weekTargetFor,
+  weeklyTarget as goalWeeklyTarget,
+} from './goalTree';
+import type { WeekStart } from './settingsApi';
 
 export { goalStartDate } from './goalTree';
 
@@ -94,19 +100,23 @@ export function dailyAmounts(
 }
 
 /**
- * Weekly plan for the Sunday–Saturday week starting at weekStart.
- * Each repeating step contributes weeklyTarget from goalTree.
- * Month goals contribute targetAmount * 7 / days in the week-start month.
+ * Weekly plan for the user's week starting at weekOf.
+ * Each repeating step contributes weekTargetFor from goalTree, so the start
+ * week is prorated. Month goals still contribute their weekly equivalent.
  */
-export function weeklyTarget(sources: Goal[], weekStart: string): number {
+export function weeklyTarget(
+  sources: Goal[],
+  weekOf: string,
+  weekStartsOn: WeekStart,
+): number {
   let total = 0;
 
   for (const source of sources) {
-    const amount = goalWeeklyTarget(source, weekStart);
-    if (amount == null) {
+    const { target } = weekTargetFor(source, weekOf, weekStartsOn);
+    if (target == null) {
       continue;
     }
-    total += amount;
+    total += target;
   }
 
   return total;
@@ -120,6 +130,7 @@ export function monthlyPlanned(
   sources: Goal[],
   month: string,
   startDate: string,
+  weekStartsOn: WeekStart,
 ): number {
   const bounds = monthOf(month);
   const from = startDate.slice(0, 10) > bounds.start ? startDate.slice(0, 10) : bounds.start;
@@ -138,7 +149,7 @@ export function monthlyPlanned(
       total += (source.targetAmount * days) / bounds.days;
       continue;
     }
-    const amount = goalWeeklyTarget(source, bounds.start);
+    const amount = goalWeeklyTarget(source, weekStartsOn, bounds.start);
     if (amount == null) {
       continue;
     }

@@ -12,6 +12,7 @@ import {
 import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DraggableItem } from '../components/DraggableItem';
+import { useSettings } from '../context/SettingsContext';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { FormFieldRow, FormInlineInput } from '../components/FormFields';
 import {
@@ -28,6 +29,7 @@ import {
   rollupTotal,
   weeklyTarget,
 } from '../lib/goalTree';
+import type { WeekStart } from '../lib/settingsApi';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { GoalEntry, Goal } from '../types/goal';
 
@@ -41,6 +43,7 @@ function cardSubtitle(
   nodes: Goal[],
   entries: GoalEntry[],
   childrenMap: Map<string | null, Goal[]>,
+  weekStartsOn: WeekStart,
 ): string {
   if (isRepeating(node)) {
     const unit = node.unit ?? 'times';
@@ -48,7 +51,7 @@ function cardSubtitle(
       const amount = node.targetAmount != null ? String(node.targetAmount) : '—';
       return `${amount} ${unit} / month`;
     }
-    const weekly = weeklyTarget(node);
+    const weekly = weeklyTarget(node, weekStartsOn);
     const amount =
       weekly == null
         ? '—'
@@ -76,6 +79,7 @@ function cardSubtitle(
 }
 
 export default function GoalsListScreen({ navigation }: Props) {
+  const { settings } = useSettings();
   const [nodes, setNodes] = useState<Goal[]>([]);
   const [entries, setEntries] = useState<GoalEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -185,6 +189,17 @@ export default function GoalsListScreen({ navigation }: Props) {
       >
         <View style={styles.headerRow}>
           <Pressable
+            onPress={() => navigation.navigate('Settings')}
+            style={({ pressed }) => [
+              styles.addButton,
+              pressed && styles.pressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+          >
+            <Ionicons name="settings-outline" size={26} color="#111" />
+          </Pressable>
+          <Pressable
             onPress={openCreate}
             style={({ pressed }) => [
               styles.addButton,
@@ -252,7 +267,7 @@ export default function GoalsListScreen({ navigation }: Props) {
                     ) : null}
                   </View>
                   <Text style={styles.cardMeta}>
-                    {cardSubtitle(node, nodes, entries, childrenMap)}
+                    {cardSubtitle(node, nodes, entries, childrenMap, settings.weekStart)}
                   </Text>
                 </View>
               </DraggableItem>
@@ -335,7 +350,7 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     marginBottom: 10,
   },
   addButton: {

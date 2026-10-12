@@ -20,12 +20,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { KeyboardSafe } from '../components/KeyboardSafe';
+import { useSettings } from '../context/SettingsContext';
 import {
   deleteEntry,
   getAllGoals,
   getEntries,
   setGoalStatus,
   upsertEntry,
+  type UpsertedEntry,
 } from '../lib/goalTreeApi';
 import {
   entriesOnOrBefore,
@@ -43,8 +45,10 @@ import {
   isRepeating,
   isTracked,
   rollupTotal,
-  weeklyTarget,
+  weekTargetFor,
 } from '../lib/goalTree';
+import type { WeekStart } from '../lib/settingsApi';
+import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
 import type { TodayStackParamList } from '../navigation/GoalsStackNavigator';
 import type { GoalEntry, Goal, GoalStatus } from '../types/goal';
 import {
@@ -52,14 +56,12 @@ import {
   formatDate,
   formatShortDate,
   getWeekday,
-  getWeekDays,
-  getWeekStart,
   isFutureDate,
   isPastDate,
   parseDateString,
+  toDateString,
   todayDateString,
   WEEKDAY_SHORT_LABELS,
-  type WeekDayCell,
 } from '../utils/date';
 import { calculateStreak, STREAK_LOOKBACK_DAYS } from '../utils/streak';
 
@@ -233,6 +235,8 @@ function buildStepControl(
   nodes: Goal[],
   entries: GoalEntry[],
   oneTimeDone: boolean,
+  asOf: string,
+  weekStartsOn: WeekStart,
 ): StepControl {
   if (!row) {
     if (oneTimeDone) {
@@ -253,12 +257,16 @@ function buildStepControl(
   const month = step.repeatPeriod === 'month';
   const amountTarget =
     step.targetAmount != null && step.targetAmount > 7;
+  const weekTarget = weekTargetFor(step, asOf, weekStartsOn).target;
   if (tracked || month || amountTarget) {
     const progress = tracked
-      ? row.progressRatio
+      ? progressRatio(
+          row.periodCount,
+          step.repeatPeriod === 'week' ? weekTarget : step.targetAmount,
+        )
       : progressRatio(
           row.periodCount,
-          step.repeatPeriod === 'month' ? monthPeriodTarget(step) : weeklyTarget(step),
+          step.repeatPeriod === 'month' ? monthPeriodTarget(step) : weekTarget,
         );
     if (progress >= 1 || (tracked && row.met)) {
       return { type: 'complete', action: 'log' };
@@ -266,8 +274,8 @@ function buildStepControl(
     return { type: 'continuous', progress, action: 'log' };
   }
 
-  const target = weeklyTarget(step);
-  if (target != null && target <= 7) {
+  const target = weekTarget;
+  if (target != null && target > 0 && target <= 7) {
     const total = Math.max(1, Math.round(target));
     const filled = Math.min(total, Math.max(0, Math.round(row.periodCount)));
     if (filled >= total) {
@@ -316,13 +324,17 @@ function detailSubtitle(
   nodes: Goal[],
   done: boolean,
   asOf: string,
+  weekStartsOn: WeekStart,
 ): { text: string; overdue: boolean } | null {
   if (isTracked(step)) {
     const total = row
       ? row.periodCount
       : (rollupTotal(step, nodes, entriesOnOrBefore(entries, asOf)) ?? 0);
-    const target =
-      step.targetAmount != null ? formatAmount(step.targetAmount) : '—';
+    const amountTarget =
+      step.repeatPeriod === 'week'
+        ? weekTargetFor(step, asOf, weekStartsOn).target
+        : step.targetAmount;
+    const target = amountTarget != null ? formatAmount(amountTarget) : '—';
     const unit = step.unit ?? '';
     const amount = `${formatAmount(total)} / ${target} ${unit}`.trim();
     const period = periodPhrase(step);
@@ -334,7 +346,9 @@ function detailSubtitle(
 
   if (row) {
     const target =
-      step.repeatPeriod === 'month' ? monthPeriodTarget(step) : weeklyTarget(step);
+      step.repeatPeriod === 'month'
+        ? monthPeriodTarget(step)
+        : weekTargetFor(step, asOf, weekStartsOn).target;
     const count = formatAmount(row.periodCount);
     const text =
       target != null
@@ -701,7 +715,7 @@ function WeekPage({
   onSelectDate,
   width,
 }: {
-  days: WeekDayCell[];
+  days: { dateString: string; label: string; dayNumber: number }[];
   today: string;
   selectedDate: string;
   onSelectDate: (dateString: string) => void;
@@ -732,7 +746,7 @@ function WeekPage({
                 isSelected && !isToday && styles.weekDayTextSelected,
               ]}
             >
-              {WEEKDAY_SHORT_LABELS[day.weekday]}
+              {day.label}
             </Text>
             <Text
               style={[
@@ -763,6 +777,7 @@ function InfiniteWeekPager({
   minWeekStart,
   maxWeekStart,
   pinnedSelectionRef,
+  weekStartsOn,
 }: {
   today: string;
   selectedDate: string;
@@ -776,6 +791,7 @@ function InfiniteWeekPager({
   minWeekStart: string;
   maxWeekStart: string;
   pinnedSelectionRef: { current: string | null };
+  weekStartsOn: WeekStart;
 }) {
   const [pageWidth, setPageWidth] = useState(0);
   const isAdjustingRef = useRef(false);
@@ -873,9 +889,7 @@ function InfiniteWeekPager({
         0,
         Math.min(
           6,
-          getWeekDays(getWeekStart(currentSelected)).findIndex(
-            (day) => day.dateString === currentSelected,
-          ),
+          weekDays(currentSelected, weekStartsOn).indexOf(currentSelected),
         ),
       );
 
@@ -883,7 +897,7 @@ function InfiniteWeekPager({
       setPageIndex(index);
       onVisibleWeekChange(weekStart);
       const pinned = pinnedSelectionRef.current;
-      if (pinned && getWeekStart(pinned) === weekStart) {
+      if (pinned && startOfWeek(pinned, weekStartsOn) === weekStart) {
         pinnedSelectionRef.current = null;
         onSelectDate(pinned);
       } else {
@@ -898,6 +912,7 @@ function InfiniteWeekPager({
       onVisibleWeekChange,
       pinnedSelectionRef,
       setPageIndex,
+      weekStartsOn,
     ],
   );
 
@@ -926,7 +941,11 @@ function InfiniteWeekPager({
   const renderItem = useCallback(
     ({ item: weekStart }: ListRenderItemInfo<string>) => (
       <WeekPage
-        days={getWeekDays(weekStart)}
+        days={weekDays(weekStart, weekStartsOn).map((dateString, index) => ({
+          dateString,
+          label: weekdayLabels(weekStartsOn)[index] ?? '',
+          dayNumber: parseDateString(dateString).getDate(),
+        }))}
         today={today}
         selectedDate={selectedDate}
         onSelectDate={onSelectDate}
@@ -1000,17 +1019,28 @@ function controlLabel(
     : 'Mark habit complete';
 }
 
+function dateKey(date: Date): string {
+  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 function WeekDots({
   goal,
   entries,
   asOf,
+  weekStartsOn,
 }: {
   goal: Goal;
   entries: GoalEntry[];
   asOf: string;
+  weekStartsOn: WeekStart;
 }) {
-  const days = getWeekDays(asOf);
+  const days = weekDays(asOf, weekStartsOn);
+  const labels = weekdayLabels(weekStartsOn);
   const start = goalStartDate(goal);
+  const startWeek = startOfWeek(start, weekStartsOn);
+  const available = new Set(
+    weekTargetFor(goal, asOf, weekStartsOn).availableDays.map(dateKey),
+  );
   const logged = new Set(
     entries
       .filter(
@@ -1022,8 +1052,8 @@ function WeekDots({
       .map((entry) => entry.entryDate),
   );
   const doneNames = days
-    .filter((day) => logged.has(day.dateString))
-    .map((day) => WEEKDAY_SHORT_LABELS[day.weekday]);
+    .filter((day) => logged.has(day))
+    .map((day) => labels[days.indexOf(day)] ?? '');
   const label =
     doneNames.length > 0 ? `Done ${doneNames.join(', ')}` : 'No days done';
 
@@ -1035,14 +1065,26 @@ function WeekDots({
       style={styles.weekDots}
     >
       {days.map((day) => {
-        if (day.dateString < start) {
-          return <View key={day.dateString} style={styles.weekDotSlot} />;
+        if (startOfWeek(day, weekStartsOn) < startWeek) {
+          return <View key={day} style={styles.weekDotSlot} />;
         }
-        const selected = day.dateString === asOf;
-        const after = day.dateString > asOf;
-        const hasEntry = logged.has(day.dateString);
+        if (!available.has(day)) {
+          return (
+            <View
+              key={day}
+              style={styles.weekDotSlot}
+              accessible={false}
+              accessibilityState={{ disabled: true }}
+            >
+              <View style={[styles.weekDot, styles.weekDotDisabled]} />
+            </View>
+          );
+        }
+        const selected = day === asOf;
+        const after = day > asOf;
+        const hasEntry = logged.has(day);
         return (
-          <View key={day.dateString} style={styles.weekDotSlot}>
+          <View key={day} style={styles.weekDotSlot}>
             {selected ? <View style={styles.weekDotRing} /> : null}
             <View
               style={[
@@ -1146,8 +1188,10 @@ function getChecklistHeading(selectedDate: string, today: string): string {
 export default function TodayScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<TodayStackParamList>>();
+  const { settings } = useSettings();
+  const weekStartsOn = settings.weekStart;
   const today = todayDateString();
-  const todayWeekStart = getWeekStart(today);
+  const todayWeekStart = startOfWeek(today, weekStartsOn);
 
   const [selectedDate, setSelectedDate] = useState(today);
   const [visibleWeekStart, setVisibleWeekStart] = useState(todayWeekStart);
@@ -1190,7 +1234,7 @@ export default function TodayScreen() {
       if (ids.length === 0) {
         return [];
       }
-      const weekEnd = addDays(weekStart, 6);
+      const weekEnd = endOfWeek(weekStart, weekStartsOn);
       const monthStart = `${weekStart.slice(0, 7)}-01`;
       const lookbackStart = addDays(weekStart, -STREAK_LOOKBACK_DAYS);
       return getEntries(
@@ -1199,7 +1243,7 @@ export default function TodayScreen() {
         weekEnd,
       );
     },
-    [],
+    [weekStartsOn],
   );
 
   const loadTodayData = useCallback(
@@ -1249,9 +1293,14 @@ export default function TodayScreen() {
     [loadEntryLogs],
   );
 
-  const weekDays = useMemo(
-    () => getWeekDays(visibleWeekStart),
-    [visibleWeekStart],
+  const visibleDays = useMemo(
+    () =>
+      weekDays(visibleWeekStart, weekStartsOn).map((dateString, index) => ({
+        dateString,
+        label: weekdayLabels(weekStartsOn)[index] ?? '',
+        dayNumber: parseDateString(dateString).getDate(),
+      })),
+    [visibleWeekStart, weekStartsOn],
   );
   const isViewingCurrentWeek = visibleWeekStart === todayWeekStart;
   const earliestWeekStart = useMemo(() => {
@@ -1269,9 +1318,9 @@ export default function TodayScreen() {
         earliest = start;
       }
     }
-    const week = getWeekStart(earliest);
+    const week = startOfWeek(earliest, weekStartsOn);
     return week > todayWeekStart ? todayWeekStart : week;
-  }, [goalsLoaded, nodes, today, todayWeekStart]);
+  }, [goalsLoaded, nodes, today, todayWeekStart, weekStartsOn]);
   const canGoPrevious = visibleWeekStart > earliestWeekStart;
   const canGoNext = visibleWeekStart < todayWeekStart;
 
@@ -1283,8 +1332,11 @@ export default function TodayScreen() {
           : weekStart > todayWeekStart
             ? todayWeekStart
             : weekStart;
+      const offset = weekDays(nextDate, weekStartsOn).indexOf(nextDate);
       const date =
-        getWeekStart(nextDate) === target ? nextDate : addDays(target, parseDateString(nextDate).getDay());
+        startOfWeek(nextDate, weekStartsOn) === target
+          ? nextDate
+          : addDays(target, offset < 0 ? 0 : offset);
       pinnedSelectionRef.current = date;
       setSelectedDate(date);
       setVisibleWeekStart(target);
@@ -1321,14 +1373,20 @@ export default function TodayScreen() {
         }
       })();
     },
-    [earliestWeekStart, loadEntryLogs, todayWeekStart, weekStarts],
+    [earliestWeekStart, loadEntryLogs, todayWeekStart, weekStarts, weekStartsOn],
   );
 
+  const appliedWeekStart = useRef(weekStartsOn);
   useEffect(() => {
     if (!goalsLoaded) {
       return;
     }
-    const focus = visibleWeekStartRef.current;
+    const settingChanged = appliedWeekStart.current !== weekStartsOn;
+    appliedWeekStart.current = weekStartsOn;
+    const anchor = settingChanged
+      ? selectedDateRef.current
+      : visibleWeekStartRef.current;
+    const focus = startOfWeek(anchor, weekStartsOn);
     const window = boundedWeekWindow(
       focus,
       earliestWeekStart,
@@ -1338,8 +1396,11 @@ export default function TodayScreen() {
     const nextWeek = window.weeks[window.index] ?? todayWeekStart;
     setWeekStarts(window.weeks);
     setPageIndex(window.index);
-    if (nextWeek !== focus) {
-      const nextDate = addDays(nextWeek, parseDateString(selectedDateRef.current).getDay());
+    if (nextWeek !== visibleWeekStartRef.current) {
+      const selected = selectedDateRef.current;
+      const inWeek = weekDays(nextWeek, weekStartsOn).includes(selected);
+      const offset = weekDays(selected, weekStartsOn).indexOf(selected);
+      const nextDate = inWeek ? selected : addDays(nextWeek, offset < 0 ? 0 : offset);
       pinnedSelectionRef.current = nextDate;
       setSelectedDate(nextDate);
       setVisibleWeekStart(nextWeek);
@@ -1357,7 +1418,7 @@ export default function TodayScreen() {
     requestAnimationFrame(() => {
       listRef.current?.scrollToIndex({ index: window.index, animated: false });
     });
-  }, [earliestWeekStart, goalsLoaded, loadEntryLogs, todayWeekStart]);
+  }, [earliestWeekStart, goalsLoaded, loadEntryLogs, todayWeekStart, weekStartsOn]);
 
   const nodesById = useMemo(
     () => new Map(nodes.map((node) => [node.id, node])),
@@ -1371,7 +1432,7 @@ export default function TodayScreen() {
       .filter((node) => listedAsRepeating(node))
       .map((node): RepeatingRow => {
         const tracked = isTracked(node);
-        const total = periodTotalAsOf(node, entries, selectedDate);
+        const total = periodTotalAsOf(node, entries, selectedDate, weekStartsOn);
         const period = periodPhrase(node);
         return {
           id: node.id,
@@ -1382,7 +1443,7 @@ export default function TodayScreen() {
               entry.goalId === node.id && entry.entryDate === selectedDate,
           ),
           isInteractive: !future,
-          met: isPeriodTargetMetAsOf(node, entries, selectedDate),
+          met: isPeriodTargetMetAsOf(node, entries, selectedDate, weekStartsOn),
           streak: calculateStreak(
             completionDates(node, entriesOnOrBefore(entries, selectedDate)),
             selectedDate,
@@ -1393,7 +1454,7 @@ export default function TodayScreen() {
           progressRatio: progressRatio(total, node.targetAmount),
         };
       });
-  }, [entries, nodes, selectedDate, today]);
+  }, [entries, nodes, selectedDate, today, weekStartsOn]);
 
   const orderedSteps = useMemo(
     () => actionableInPlanOrder(nodes, childrenMap, selectedDate),
@@ -1455,6 +1516,14 @@ export default function TodayScreen() {
       });
   };
 
+  const applySavedGoals = (goals: Goal[]) => {
+    if (goals.length === 0) {
+      return;
+    }
+    const byId = new Map(goals.map((goal) => [goal.id, goal]));
+    setNodes((current) => current.map((item) => byId.get(item.id) ?? item));
+  };
+
   const handleToggle = (item: RepeatingRow) => {
     if (!item.isInteractive || item.tracked) {
       return;
@@ -1477,12 +1546,15 @@ export default function TodayScreen() {
 
     pendingTogglesRef.current.add(toggleKey);
     const persist = wasComplete
-      ? deleteEntry(item.id, selectedDate)
-      : upsertEntry(item.id, selectedDate, null);
+      ? deleteEntry(item.id, selectedDate).then(() => undefined)
+      : upsertEntry(item.id, selectedDate, null).then((saved) => {
+          applySavedGoals(saved.goals);
+          return saved.entry;
+        });
 
     void persist
       .then((saved) => {
-        if (wasComplete || saved == null || typeof saved === 'boolean') {
+        if (!saved) {
           return;
         }
         setEntries((current) =>
@@ -1521,7 +1593,7 @@ export default function TodayScreen() {
     goalId: string,
     date: string,
     nextEntries: GoalEntry[],
-    persist: Promise<GoalEntry | void>,
+    persist: Promise<UpsertedEntry | void>,
   ) => {
     const previous = entriesRef.current;
     const toggleKey = `${goalId}:${date}`;
@@ -1536,10 +1608,12 @@ export default function TodayScreen() {
         if (!saved) {
           return;
         }
+        applySavedGoals(saved.goals);
         setEntries((current) =>
           current.map((entry) =>
-            entry.goalId === saved.goalId && entry.entryDate === saved.entryDate
-              ? saved
+            entry.goalId === saved.entry.goalId &&
+            entry.entryDate === saved.entry.entryDate
+              ? saved.entry
               : entry,
           ),
         );
@@ -1656,8 +1730,8 @@ export default function TodayScreen() {
             />
           </Pressable>
           <Text style={styles.weekLabel} numberOfLines={1}>
-            {formatDate(weekDays[0]?.dateString ?? visibleWeekStart)} –{' '}
-            {formatDate(weekDays[6]?.dateString ?? visibleWeekStart)}
+            {formatDate(visibleDays[0]?.dateString ?? visibleWeekStart)} –{' '}
+            {formatDate(visibleDays[6]?.dateString ?? visibleWeekStart)}
           </Text>
           <Pressable
             onPress={() =>
@@ -1705,6 +1779,7 @@ export default function TodayScreen() {
         minWeekStart={earliestWeekStart}
         maxWeekStart={todayWeekStart}
         pinnedSelectionRef={pinnedSelectionRef}
+        weekStartsOn={weekStartsOn}
       />
 
       <View style={styles.headingRow}>
@@ -1753,6 +1828,8 @@ export default function TodayScreen() {
                   nodes,
                   entriesOnOrBefore(entries, selectedDate),
                   oneTimeDone,
+                  selectedDate,
+                  weekStartsOn,
                 );
                 const done = isRowDone(row, oneTimeDone, control);
                 const detail = detailSubtitle(
@@ -1762,6 +1839,7 @@ export default function TodayScreen() {
                   nodes,
                   done,
                   selectedDate,
+                  weekStartsOn,
                 );
                 const streak = row?.streak ?? 0;
                 const loggedOnDay = row?.isComplete ?? false;
@@ -1802,6 +1880,7 @@ export default function TodayScreen() {
                             goal={step}
                             entries={entries}
                             asOf={selectedDate}
+                            weekStartsOn={weekStartsOn}
                           />
                         ) : undefined
                       }
@@ -2095,6 +2174,9 @@ const styles = StyleSheet.create({
   },
   weekDotMissed: {
     backgroundColor: '#D1D1D6',
+  },
+  weekDotDisabled: {
+    backgroundColor: '#E5E5EA',
   },
   weekDotHollow: {
     backgroundColor: 'transparent',

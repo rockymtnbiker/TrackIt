@@ -1,6 +1,8 @@
 import type { Goal, GoalEntry } from '../types/goal';
-import { addDays, getWeekStart, parseDateString } from '../utils/date';
-import { buildChildrenMap, isLeaf, isRepeating, isTracked, periodTotal, weeklyTarget } from './goalTree';
+import { addDays, parseDateString } from '../utils/date';
+import { buildChildrenMap, isLeaf, isRepeating, isTracked, periodTotal, weekTargetFor } from './goalTree';
+import type { WeekStart } from './settingsApi';
+import { endOfWeek, startOfWeek } from './week';
 
 export type WeeklyItem = {
   goalId: string;
@@ -48,27 +50,28 @@ function parentTitle(goal: Goal, byId: Map<string, Goal>): string | null {
   return byId.get(goal.parentId)?.title ?? null;
 }
 
-function endOfWeek(weekStart: Date): Date {
-  const saturday = parseDateString(addDays(localDateString(weekStart), 6));
-  saturday.setHours(23, 59, 59, 999);
-  return saturday;
+function endOfWeekDate(weekOf: string, weekStartsOn: WeekStart): Date {
+  const end = parseDateString(endOfWeek(weekOf, weekStartsOn));
+  end.setHours(23, 59, 59, 999);
+  return end;
 }
 
 /**
- * Actionable steps for the Sunday–Saturday week that starts at weekStart.
+ * Actionable steps for the user's week that starts at weekStart.
  * Week bounds are local calendar days, matching the 6-week section.
- * asOf defaults to Saturday 23:59. Entries and completions after that moment
- * do not count.
+ * asOf defaults to the last day of that week at 23:59. Entries and
+ * completions after that moment do not count.
  */
 export function getWeeklyItems(
   goals: Goal[],
   entries: GoalEntry[],
   weekStart: Date,
-  asOf?: Date,
+  asOf: Date | undefined,
+  weekStartsOn: WeekStart,
 ): WeeklyReview {
   const start = localDateString(weekStart);
-  const end = addDays(start, 6);
-  const cutoff = localDateString(asOf ?? endOfWeek(weekStart));
+  const end = endOfWeek(start, weekStartsOn);
+  const cutoff = localDateString(asOf ?? endOfWeekDate(start, weekStartsOn));
   const visibleEntries = entries.filter((entry) => entry.entryDate.slice(0, 10) <= cutoff);
   const childrenMap = buildChildrenMap(goals);
   const byId = new Map(goals.map((goal) => [goal.id, goal]));
@@ -86,8 +89,8 @@ export function getWeeklyItems(
     }
 
     if (isRepeating(goal) && goal.repeatPeriod === 'week') {
-      const total = periodTotal(goal, visibleEntries, start);
-      const target = weeklyTarget(goal, start);
+      const total = periodTotal(goal, visibleEntries, start, weekStartsOn);
+      const { target } = weekTargetFor(goal, start, weekStartsOn);
       const partial = target != null && target > 0 ? Math.min(total / target, 1) : 0;
       items.push({
         goalId: goal.id,
@@ -145,19 +148,30 @@ const WEEK_STREAK_DONE = 0.8;
  * The current week adds 1 when it is already at 80%, and does not break the
  * streak when it is not.
  */
-export function getWeekStreak(goals: Goal[], entries: GoalEntry[], today: Date): number {
+export function getWeekStreak(
+  goals: Goal[],
+  entries: GoalEntry[],
+  today: Date,
+  weekStartsOn: WeekStart,
+): number {
   // TODO: one-time steps need completed_at for history
   const repeatingGoals = goals.filter(
     (goal) =>
       isRepeating(goal) && goal.repeatPeriod === 'week',
   );
-  const currentWeekStart = getWeekStart(localDateString(today));
+  const currentWeekStart = startOfWeek(localDateString(today), weekStartsOn);
   let streak = 0;
 
   for (let weeksAgo = 1; weeksAgo <= WEEK_STREAK_LOOKBACK; weeksAgo += 1) {
     const start = addDays(currentWeekStart, -7 * weeksAgo);
-    const end = addDays(start, 6);
-    const review = getWeeklyItems(repeatingGoals, entries, parseDateString(start));
+    const end = endOfWeek(start, weekStartsOn);
+    const review = getWeeklyItems(
+      repeatingGoals,
+      entries,
+      parseDateString(start),
+      undefined,
+      weekStartsOn,
+    );
     const beforeAnyStart =
       review.totalCount === 0 && goals.every((goal) => startDate(goal) > end);
     if (beforeAnyStart || review.donePct < WEEK_STREAK_DONE) {
@@ -166,7 +180,13 @@ export function getWeekStreak(goals: Goal[], entries: GoalEntry[], today: Date):
     streak += 1;
   }
 
-  const current = getWeeklyItems(goals, entries, parseDateString(currentWeekStart), today);
+  const current = getWeeklyItems(
+    goals,
+    entries,
+    parseDateString(currentWeekStart),
+    today,
+    weekStartsOn,
+  );
   if (current.donePct >= WEEK_STREAK_DONE) {
     streak += 1;
   }
@@ -214,12 +234,17 @@ export function getAtRiskItems(
   goals: Goal[],
   entries: GoalEntry[],
   today: Date,
+  weekStartsOn: WeekStart,
 ): AtRiskItem[] {
   const todayString = localDateString(today);
-  const weekStart = getWeekStart(todayString);
-  const weekEnd = addDays(weekStart, 6);
-  const daysLeft = daysBetween(todayString, weekEnd) + 1;
-  const review = getWeeklyItems(goals, entries, parseDateString(weekStart), today);
+  const weekStart = startOfWeek(todayString, weekStartsOn);
+  const review = getWeeklyItems(
+    goals,
+    entries,
+    parseDateString(weekStart),
+    today,
+    weekStartsOn,
+  );
   const visibleEntries = entries.filter((entry) => entry.entryDate.slice(0, 10) <= todayString);
   const byId = new Map(goals.map((goal) => [goal.id, goal]));
   const ranked: RankedRisk[] = [];
@@ -234,16 +259,18 @@ export function getAtRiskItems(
     }
 
     if (isRepeating(goal) && goal.repeatPeriod === 'week') {
-      const target = weeklyTarget(goal, weekStart);
-      if (target == null || target <= 0 || daysLeft <= 0) {
+      const { target, availableDays } = weekTargetFor(goal, weekStart, weekStartsOn);
+      const span = availableDays.length;
+      const daysLeft = availableDays.filter((day) => localDateString(day) >= todayString).length;
+      if (target == null || target <= 0 || daysLeft <= 0 || span <= 0) {
         continue;
       }
-      const logged = periodTotal(goal, visibleEntries, todayString);
+      const logged = periodTotal(goal, visibleEntries, todayString, weekStartsOn);
       const remaining = target - logged;
       if (remaining <= 0) {
         continue;
       }
-      const normalRate = target / 7;
+      const normalRate = target / span;
       const requiredRate = remaining / daysLeft;
       const severity = normalRate > 0 ? requiredRate / normalRate : Number.POSITIVE_INFINITY;
       const cantFinish = !isTracked(goal) && remaining > daysLeft;

@@ -5,7 +5,6 @@ import { Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DashboardScreen from '../screens/DashboardScreen';
 import GoalScreen from '../screens/GoalScreen';
-import StepDetailScreen from '../screens/StepDetailScreen';
 import TodayScreen from '../screens/TodayScreen';
 import GoalsStackNavigator, {
   type TodayStackParamList,
@@ -36,17 +35,12 @@ function TodayStackNavigator() {
       <TodayStack.Screen
         name="TodayMain"
         component={TodayScreen}
-        options={{ headerShown: false }}
+        options={{ headerShown: false, title: 'Do', headerBackTitle: 'Do' }}
       />
       <TodayStack.Screen
         name="Goal"
         component={GoalScreen}
         options={{ title: '', headerTitleAlign: 'center' }}
-      />
-      <TodayStack.Screen
-        name="StepDetail"
-        component={StepDetailScreen}
-        options={{ title: 'Edit goal', headerTitleAlign: 'center' }}
       />
     </TodayStack.Navigator>
   );
@@ -58,17 +52,16 @@ function DashboardStackNavigator() {
       <DashboardStack.Screen
         name="DashboardMain"
         component={DashboardScreen}
-        options={{ headerShown: false }}
+        options={{
+          headerShown: false,
+          title: 'Review',
+          headerBackTitle: 'Review',
+        }}
       />
       <DashboardStack.Screen
         name="Goal"
         component={GoalScreen}
         options={{ title: '', headerTitleAlign: 'center' }}
-      />
-      <DashboardStack.Screen
-        name="StepDetail"
-        component={StepDetailScreen}
-        options={{ title: 'Edit goal', headerTitleAlign: 'center' }}
       />
     </DashboardStack.Navigator>
   );

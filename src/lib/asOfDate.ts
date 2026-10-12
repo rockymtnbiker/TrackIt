@@ -1,6 +1,7 @@
 import type { Goal, GoalEntry } from '../types/goal';
 import { parseDateString } from '../utils/date';
 import { goalStartDate, isRepeating, periodTotal } from './goalTree';
+import type { WeekStart } from './settingsApi';
 
 export { periodBounds, weeklyTarget } from './goalTree';
 
@@ -60,15 +61,16 @@ export function entriesOnOrBefore(
 }
 
 /**
- * Period total as of D: the week (Sun–Sat) or month that contains D,
+ * Period total as of D: the user's week or calendar month that contains D,
  * counting only entries in that period dated on or before D.
  */
 export function periodTotalAsOf(
   node: Goal,
   entries: GoalEntry[],
   asOf: string,
+  weekStartsOn: WeekStart,
 ): number {
-  return periodTotal(node, entriesOnOrBefore(entries, asOf), asOf);
+  return periodTotal(node, entriesOnOrBefore(entries, asOf), asOf, weekStartsOn);
 }
 
 /** False when the step has no target amount. Uses the as-of-D period total. */
@@ -76,9 +78,10 @@ export function isPeriodTargetMetAsOf(
   node: Goal,
   entries: GoalEntry[],
   asOf: string,
+  weekStartsOn: WeekStart,
 ): boolean {
   if (node.targetAmount == null) {
     return false;
   }
-  return periodTotalAsOf(node, entries, asOf) >= node.targetAmount;
+  return periodTotalAsOf(node, entries, asOf, weekStartsOn) >= node.targetAmount;
 }

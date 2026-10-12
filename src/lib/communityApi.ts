@@ -225,7 +225,7 @@ function treeFromRoots(all: Goal[], rootIds: Set<string>): Goal[] {
 }
 
 export async function sendPartnerInvite(email: string): Promise<Connection | null> {
-  const { data, error } = await supabase.rpc('send_partner_invite', { email });
+  const { data, error } = await supabase.rpc('send_partner_invite', { p_email: email });
   if (error) {
     throw error;
   }
@@ -236,7 +236,7 @@ export async function respondToInvite(
   id: string,
   accept: boolean,
 ): Promise<Connection | null> {
-  const { data, error } = await supabase.rpc('respond_to_invite', { id, accept });
+  const { data, error } = await supabase.rpc('respond_to_invite', { p_id: id, p_accept: accept });
   if (error) {
     throw error;
   }
@@ -244,21 +244,21 @@ export async function respondToInvite(
 }
 
 export async function cancelInvite(id: string): Promise<void> {
-  const { error } = await supabase.rpc('cancel_invite', { id });
+  const { error } = await supabase.rpc('cancel_invite', { p_id: id });
   if (error) {
     throw error;
   }
 }
 
 export async function removePartner(id: string): Promise<void> {
-  const { error } = await supabase.rpc('remove_partner', { id });
+  const { error } = await supabase.rpc('remove_partner', { p_id: id });
   if (error) {
     throw error;
   }
 }
 
 export async function blockPartner(id: string): Promise<void> {
-  const { error } = await supabase.rpc('block_partner', { id });
+  const { error } = await supabase.rpc('block_partner', { p_id: id });
   if (error) {
     throw error;
   }

@@ -1,11 +1,13 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CommunityProvider, useCommunity } from '../context/CommunityContext';
 import DashboardScreen from '../screens/DashboardScreen';
 import GoalScreen from '../screens/GoalScreen';
 import TodayScreen from '../screens/TodayScreen';
+import CommunityStackNavigator from './CommunityStackNavigator';
 import GoalsStackNavigator, {
   type TodayStackParamList,
 } from './GoalsStackNavigator';
@@ -14,6 +16,7 @@ export type RootTabParamList = {
   Today: undefined;
   Goals: undefined;
   Dashboard: undefined;
+  Community: undefined;
 };
 
 export type { TodayStackParamList };
@@ -67,8 +70,18 @@ function DashboardStackNavigator() {
   );
 }
 
-export default function TabNavigator() {
+function InviteBadge({ count }: { count: number }) {
+  const label = count > 99 ? '99+' : String(count);
+  return (
+    <View style={styles.badge} accessibilityLabel={`${label} incoming invites`}>
+      <Text style={styles.badgeText}>{label}</Text>
+    </View>
+  );
+}
+
+function TabScreens() {
   const insets = useSafeAreaInsets();
+  const { incomingCount } = useCommunity();
   const tabBarHeight = 49 + insets.bottom;
 
   return (
@@ -155,12 +168,55 @@ export default function TabNavigator() {
           ),
         }}
       />
+      <Tab.Screen
+        name="Community"
+        component={CommunityStackNavigator}
+        options={{
+          tabBarLabel: 'Community',
+          tabBarAccessibilityLabel:
+            incomingCount > 0
+              ? `Community, ${incomingCount} incoming invites`
+              : 'Community',
+          tabBarBadge:
+            incomingCount > 0 ? () => <InviteBadge count={incomingCount} /> : undefined,
+          tabBarIcon: ({ color }) => (
+            <MaterialCommunityIcons
+              name="account-group"
+              size={24}
+              color={color}
+              style={styles.tabIcon}
+            />
+          ),
+        }}
+      />
     </Tab.Navigator>
+  );
+}
+
+export default function TabNavigator() {
+  return (
+    <CommunityProvider>
+      <TabScreens />
+    </CommunityProvider>
   );
 }
 
 const styles = StyleSheet.create({
   tabIcon: {
     marginTop: 2,
+  },
+  badge: {
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#ff3b30',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

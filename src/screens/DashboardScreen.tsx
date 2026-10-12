@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import type { WeekStart } from '../lib/settingsApi';
 import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
@@ -607,10 +606,8 @@ function missedThisWeek(
 }
 
 export default function DashboardScreen({ navigation }: Props) {
-  const { signOut } = useAuth();
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
-  const [signingOut, setSigningOut] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nodes, setNodes] = useState<Goal[]>([]);
@@ -703,15 +700,6 @@ export default function DashboardScreen({ navigation }: Props) {
       void loadDashboard();
     }, [loadDashboard]),
   );
-
-  const handleSignOut = async () => {
-    if (signingOut) {
-      return;
-    }
-    setSigningOut(true);
-    await signOut();
-    setSigningOut(false);
-  };
 
   const today = todayDateString();
   const currentWeek = startOfWeek(today, weekStartsOn);
@@ -896,22 +884,6 @@ export default function DashboardScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <View style={styles.headerRow}>
-          <Pressable
-            onPress={handleSignOut}
-            disabled={signingOut}
-            hitSlop={8}
-            style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]}
-            accessibilityLabel="Log out"
-          >
-            {signingOut ? (
-              <ActivityIndicator size="small" color="#007aff" />
-            ) : (
-              <Ionicons name="log-out-outline" size={24} color="#007aff" />
-            )}
-          </Pressable>
-        </View>
-
         <View style={styles.segmentTrack}>
           {DASHBOARD_PERIODS.map((option) => {
             const selected = period === option.id;
@@ -1203,19 +1175,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 14,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginBottom: 10,
-  },
-  logoutButton: {
-    padding: 4,
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   segmentTrack: {
     flexDirection: 'row',

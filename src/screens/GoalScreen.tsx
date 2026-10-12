@@ -518,9 +518,11 @@ export default function GoalScreen({ navigation, route }: Props) {
             <Pressable
               onPress={() => navigation.push('Goal', { goalId: parent.id })}
               hitSlop={6}
-              accessibilityRole="button"
+              accessibilityRole="link"
               accessibilityLabel={`Open ${parent.title}`}
+              style={({ pressed }) => [styles.parentLink, pressed && styles.pressed]}
             >
+              <Ionicons name="chevron-up" size={14} color="#007aff" />
               <Text style={styles.parentTitle} numberOfLines={1}>
                 {parent.title || 'Untitled'}
               </Text>
@@ -1177,9 +1179,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  parentLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    gap: 2,
+  },
   parentTitle: {
+    flexShrink: 1,
     fontSize: 15,
-    color: '#6b6b70',
+    fontWeight: '500',
+    color: '#007aff',
   },
   title: {
     flex: 1,

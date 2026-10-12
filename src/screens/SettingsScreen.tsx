@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -9,10 +9,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
+import { getDisplayName, saveDisplayName } from '../lib/profileApi';
 import type { TimeFormat, WeekStart } from '../lib/settingsApi';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 
@@ -92,10 +94,72 @@ function ChoiceRow<T extends string | number>({
   );
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    error.message
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export default function SettingsScreen({ navigation }: Props) {
   const { user, signOut } = useAuth();
   const { settings, loading, updateSettings } = useSettings();
   const [signingOut, setSigningOut] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [savedName, setSavedName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDisplayName()
+      .then((name) => {
+        if (cancelled) {
+          return;
+        }
+        setDisplayName(name);
+        setSavedName(name);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          Alert.alert(
+            'Could not load display name',
+            errorMessage(error, 'Display name was not loaded.'),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const persistDisplayName = async (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed === savedName || savingName) {
+      return;
+    }
+    setSavingName(true);
+    try {
+      await saveDisplayName(trimmed);
+      setDisplayName(trimmed);
+      setSavedName(trimmed);
+    } catch (error) {
+      Alert.alert(
+        'Could not save',
+        errorMessage(error, 'Display name was not saved.'),
+      );
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const save = async (patch: Parameters<typeof updateSettings>[0]) => {
     try {
@@ -160,6 +224,27 @@ export default function SettingsScreen({ navigation }: Props) {
 
       <Text style={styles.section}>Account</Text>
       <View style={styles.card}>
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>Display name</Text>
+          <TextInput
+            value={displayName}
+            onChangeText={setDisplayName}
+            onEndEditing={(event) => {
+              void persistDisplayName(event.nativeEvent.text);
+            }}
+            onSubmitEditing={(event) => {
+              void persistDisplayName(event.nativeEvent.text);
+            }}
+            placeholder="Your name"
+            placeholderTextColor="#c7c7cc"
+            autoCapitalize="words"
+            autoCorrect={false}
+            returnKeyType="done"
+            style={styles.nameInput}
+          />
+        </View>
+        <Text style={styles.helper}>Shown to your partners.</Text>
+        <View style={styles.separator} />
         <View style={styles.row}>
           <Text style={styles.rowLabel}>Email</Text>
           <Text style={styles.email} numberOfLines={1}>
@@ -252,6 +337,20 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: '#8e8e93',
     textAlign: 'right',
+  },
+  nameInput: {
+    flex: 1,
+    fontSize: 17,
+    color: '#111',
+    textAlign: 'right',
+    paddingVertical: 0,
+  },
+  helper: {
+    fontSize: 13,
+    color: '#6b6b70',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    marginTop: -4,
   },
   logout: {
     fontSize: 17,

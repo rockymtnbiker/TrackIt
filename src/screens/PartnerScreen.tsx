@@ -1,10 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
+  Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -16,8 +19,10 @@ import {
 import { useSettings } from '../context/SettingsContext';
 import { periodTotalAsOf } from '../lib/asOfDate';
 import {
+  blockPartner,
   getGoalsSharedWithMe,
   getMySharesWith,
+  removePartner,
   shareGoal,
   unshareGoal,
 } from '../lib/communityApi';
@@ -147,7 +152,9 @@ function ThinBar({ percent }: { percent: number }) {
 }
 
 export default function PartnerScreen({ navigation, route }: Props) {
-  const { name, partnerId } = route.params;
+  const { name, partnerId, connectionId } = route.params;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [acting, setActing] = useState(false);
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const [sharedGoals, setSharedGoals] = useState<Goal[]>([]);
@@ -194,6 +201,99 @@ export default function PartnerScreen({ navigation, route }: Props) {
       void load();
     }, [load]),
   );
+
+  const finishPartnerAction = async (action: () => Promise<void>, failureTitle: string) => {
+    if (acting) {
+      return;
+    }
+    setActing(true);
+    try {
+      await action();
+      navigation.goBack();
+    } catch (error) {
+      Alert.alert(failureTitle, errorMessage(error));
+      setActing(false);
+    }
+  };
+
+  const confirmRemove = () => {
+    setMenuOpen(false);
+    Alert.alert(
+      `Remove ${name}?`,
+      "You'll both stop seeing each other's shared goals. You can invite each other again later.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            void finishPartnerAction(
+              () => removePartner(connectionId),
+              'Could not remove partner',
+            );
+          },
+        },
+      ],
+    );
+  };
+
+  const confirmBlock = () => {
+    setMenuOpen(false);
+    Alert.alert(
+      `Block ${name}?`,
+      "You'll stop seeing each other's goals and they can't invite you again.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: () => {
+            void finishPartnerAction(
+              () => blockPartner(connectionId),
+              'Could not block partner',
+            );
+          },
+        },
+      ],
+    );
+  };
+
+  const openActions = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Remove workout partner', `Block ${name}`, 'Cancel'],
+          cancelButtonIndex: 2,
+          destructiveButtonIndex: 1,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 0) {
+            confirmRemove();
+          } else if (buttonIndex === 1) {
+            confirmBlock();
+          }
+        },
+      );
+      return;
+    }
+    setMenuOpen(true);
+  };
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable
+          onPress={openActions}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Partner actions"
+          style={styles.menuButton}
+        >
+          <Text style={styles.menuButtonText}>•••</Text>
+        </Pressable>
+      ),
+    });
+  }, [navigation, name, connectionId, acting]);
 
   const today = todayDateString();
   const theirGoals = useMemo(
@@ -270,6 +370,7 @@ export default function PartnerScreen({ navigation, route }: Props) {
   }
 
   return (
+    <View style={styles.screen}>
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
@@ -385,6 +486,42 @@ export default function PartnerScreen({ navigation, route }: Props) {
         )}
       </View>
     </ScrollView>
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setMenuOpen(false)}>
+          <Pressable style={styles.sheetCard} onPress={() => {}}>
+            <View style={styles.sheetGroup}>
+              <Pressable
+                onPress={confirmRemove}
+                style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.sheetText}>Remove workout partner</Text>
+              </Pressable>
+              <View style={styles.sheetSeparator} />
+              <Pressable
+                onPress={confirmBlock}
+                style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.sheetDestructive}>Block {name}</Text>
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={() => setMenuOpen(false)}
+              style={({ pressed }) => [styles.sheetCancel, pressed && styles.pressed]}
+              accessibilityRole="button"
+            >
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </View>
   );
 }
 
@@ -486,6 +623,64 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.7,
+  },
+  menuButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuButtonText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#007aff',
+    letterSpacing: 1,
+  },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+    padding: 12,
+  },
+  sheetCard: {
+    marginBottom: 8,
+  },
+  sheetGroup: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  sheetRow: {
+    backgroundColor: '#fff',
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  sheetText: {
+    fontSize: 17,
+    color: '#111',
+  },
+  sheetDestructive: {
+    fontSize: 17,
+    color: '#ff3b30',
+  },
+  sheetSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#e5e5ea',
+  },
+  sheetCancel: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  sheetCancelText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#007aff',
   },
   weekDots: {
     flexDirection: 'row',

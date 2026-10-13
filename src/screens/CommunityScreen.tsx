@@ -57,6 +57,16 @@ function partnerLabel(connection: Connection): string {
   return 'Partner';
 }
 
+function blockedByMe(connection: Connection): boolean {
+  return (
+    connection.status.toLowerCase() === 'blocked' && connection.blockedByMe !== false
+  );
+}
+
+function hiddenFromMe(connection: Connection): boolean {
+  return connection.status.toLowerCase() === 'blocked' && connection.blockedByMe === false;
+}
+
 function isEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
@@ -92,13 +102,17 @@ export default function CommunityScreen({ navigation }: Props) {
     }, [load]),
   );
 
-  const pending = connections.filter(
+  const visible = connections.filter((connection) => !hiddenFromMe(connection));
+  const pending = visible.filter(
     (connection) => connection.status.toLowerCase() === 'pending',
   );
   const incoming = pending.filter((connection) => connection.incoming === true);
   const outgoing = pending.filter((connection) => connection.incoming === false);
-  const partners = connections
+  const partners = visible
     .filter((connection) => connection.status.toLowerCase() === 'accepted')
+    .sort((a, b) => partnerLabel(a).localeCompare(partnerLabel(b)));
+  const blocked = visible
+    .filter((connection) => blockedByMe(connection))
     .sort((a, b) => partnerLabel(a).localeCompare(partnerLabel(b)));
   const hasInvites = incoming.length > 0 || outgoing.length > 0;
   const isEmpty = !hasInvites && partners.length === 0;
@@ -297,6 +311,18 @@ export default function CommunityScreen({ navigation }: Props) {
             Partners can see the goals you choose to share. Invite someone to get started.
           </Text>
         ) : null}
+
+        {blocked.length > 0 ? (
+          <Pressable
+            onPress={() => navigation.navigate('Blocked')}
+            style={({ pressed }) => [styles.blockedRow, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`Blocked, ${blocked.length}`}
+          >
+            <Text style={styles.blockedLabel}>Blocked</Text>
+            <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <Modal
@@ -458,6 +484,18 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: '#6b6b70',
     paddingHorizontal: 4,
+  },
+  blockedRow: {
+    marginTop: 8,
+    minHeight: 44,
+    paddingHorizontal: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  blockedLabel: {
+    fontSize: 15,
+    color: '#6b6b70',
   },
   errorText: {
     fontSize: 14,

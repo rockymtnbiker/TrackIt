@@ -25,6 +25,9 @@ type ConnectionRow = {
   is_incoming?: boolean | null;
   direction?: string | null;
   role?: string | null;
+  blocked_by_me?: boolean | null;
+  i_blocked?: boolean | null;
+  is_blocker?: boolean | null;
   created_at?: string | null;
 };
 
@@ -164,6 +167,14 @@ function mapConnection(row: ConnectionRow): Connection {
     ),
     status: row.status ?? '',
     incoming,
+    blockedByMe:
+      typeof row.blocked_by_me === 'boolean'
+        ? row.blocked_by_me
+        : typeof row.i_blocked === 'boolean'
+          ? row.i_blocked
+          : typeof row.is_blocker === 'boolean'
+            ? row.is_blocker
+            : null,
     createdAt: row.created_at ?? '',
   };
 }

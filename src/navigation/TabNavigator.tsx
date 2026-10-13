@@ -9,6 +9,7 @@ import GoalScreen from '../screens/GoalScreen';
 import TodayScreen from '../screens/TodayScreen';
 import CommunityStackNavigator from './CommunityStackNavigator';
 import GoalsStackNavigator, {
+  type GoalRouteParams,
   type TodayStackParamList,
 } from './GoalsStackNavigator';
 
@@ -23,7 +24,7 @@ export type { TodayStackParamList };
 
 export type DashboardStackParamList = {
   DashboardMain: undefined;
-  Goal: { goalId: string };
+  Goal: GoalRouteParams;
   StepDetail: { goalId: string };
 };
 

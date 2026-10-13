@@ -4,9 +4,16 @@ import GoalScreen from '../screens/GoalScreen';
 import GoalsListScreen from '../screens/GoalsListScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 
+export type GoalRouteParams = {
+  goalId: string;
+  readOnly?: boolean;
+  ownerId?: string;
+  sharedByName?: string;
+};
+
 export type GoalsStackParamList = {
   GoalsList: undefined;
-  Goal: { goalId: string };
+  Goal: GoalRouteParams;
   Settings: undefined;
   DeleteAccount: undefined;
   StepDetail: { goalId: string };
@@ -14,7 +21,7 @@ export type GoalsStackParamList = {
 
 export type TodayStackParamList = {
   TodayMain: undefined;
-  Goal: { goalId: string };
+  Goal: GoalRouteParams;
   StepDetail: { goalId: string };
 };
 

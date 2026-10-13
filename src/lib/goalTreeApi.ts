@@ -179,8 +179,8 @@ async function fetchNodeRow(
   return (data as GoalRow | null) ?? null;
 }
 
-export async function getAllGoals(): Promise<Goal[]> {
-  const userId = await requireUserId();
+export async function getAllGoals(ownerId?: string): Promise<Goal[]> {
+  const userId = ownerId ?? (await requireUserId());
   const { data, error } = await supabase
     .from(GOALS_TABLE)
     .select('*')
@@ -474,12 +474,13 @@ export async function getEntries(
   goalIds: string[],
   from?: string,
   to?: string,
+  ownerId?: string,
 ): Promise<GoalEntry[]> {
   if (goalIds.length === 0) {
     return [];
   }
 
-  const userId = await requireUserId();
+  const userId = ownerId ?? (await requireUserId());
   let query = supabase
     .from(ENTRIES_TABLE)
     .select('id, goal_id, entry_date, value')

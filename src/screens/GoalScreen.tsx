@@ -16,6 +16,7 @@ import { ScrollView } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
 import GoalDetailCards from '../components/GoalDetailCards';
 import GoalEditForm, { type GoalEditFormHandle } from '../components/GoalEditForm';
+import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { PendingStatusCircle } from '../components/PendingStatusCircle';
@@ -155,7 +156,9 @@ function StatusMark({ status }: { status: GoalStatus }) {
 }
 
 export default function GoalScreen({ navigation, route }: Props) {
-  const { goalId } = route.params;
+  const { goalId, readOnly = false, sharedByName } = route.params;
+  const { user } = useAuth();
+  const ownerId = readOnly ? route.params.ownerId : user?.id;
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const today = todayDateString();
@@ -181,12 +184,20 @@ export default function GoalScreen({ navigation, route }: Props) {
   editingRef.current = editing;
 
   const load = useCallback(async () => {
+    if (!ownerId) {
+      if (readOnly) {
+        setLoadError('This shared goal could not be opened.');
+        setNode(null);
+        setLoading(false);
+      }
+      return;
+    }
     setLoadError(null);
     try {
-      const nextNodes = await getAllGoals();
+      const nextNodes = await getAllGoals(ownerId);
       const found = nextNodes.find((item) => item.id === goalId) ?? null;
       const ids = found ? subtreeIds(found.id, nextNodes) : [];
-      const nextEntries = ids.length > 0 ? await getEntries(ids) : [];
+      const nextEntries = ids.length > 0 ? await getEntries(ids, undefined, undefined, ownerId) : [];
       setNodes(nextNodes);
       setNode(found);
       setEntries(nextEntries);
@@ -197,7 +208,23 @@ export default function GoalScreen({ navigation, route }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [goalId]);
+  }, [goalId, ownerId, readOnly]);
+
+  const openGoal = useCallback(
+    (id: string) => {
+      if (readOnly && ownerId) {
+        navigation.push('Goal', {
+          goalId: id,
+          readOnly: true,
+          ownerId,
+          sharedByName,
+        });
+        return;
+      }
+      navigation.push('Goal', { goalId: id });
+    },
+    [navigation, ownerId, readOnly, sharedByName],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -516,7 +543,7 @@ export default function GoalScreen({ navigation, route }: Props) {
         <View style={styles.titleBlock}>
           {!editing && parent ? (
             <Pressable
-              onPress={() => navigation.push('Goal', { goalId: parent.id })}
+              onPress={() => openGoal(parent.id)}
               hitSlop={6}
               accessibilityRole="link"
               accessibilityLabel={`Open ${parent.title}`}
@@ -530,6 +557,7 @@ export default function GoalScreen({ navigation, route }: Props) {
           ) : null}
           <View style={styles.titleLine}>
             <Text style={styles.title}>{node.title || 'Untitled'}</Text>
+            {readOnly ? null : (
             <View style={styles.titleActions}>
               {editing ? (
                 <>
@@ -565,7 +593,11 @@ export default function GoalScreen({ navigation, route }: Props) {
                 </Pressable>
               )}
             </View>
+            )}
           </View>
+          {readOnly && sharedByName ? (
+            <Text style={styles.sharedBy}>Shared by {sharedByName}</Text>
+          ) : null}
           {editing ? null : (
           <View style={styles.metaRow}>
             <View style={[styles.pill, styles[`pill_${node.status}`]]}>
@@ -609,7 +641,7 @@ export default function GoalScreen({ navigation, route }: Props) {
             </View>
             {nextUp ? (
               <Pressable
-                onPress={() => navigation.push('Goal', { goalId: nextUp.id })}
+                onPress={() => openGoal(nextUp.id)}
                 style={({ pressed }) => [styles.nextUp, pressed && styles.pressed]}
                 accessibilityRole="button"
                 accessibilityLabel={`Next up ${nextUp.title || 'Untitled'}`}
@@ -633,6 +665,7 @@ export default function GoalScreen({ navigation, route }: Props) {
             today={today}
             analysis={analysis}
             loggedToday={loggedToday}
+            canLog={!readOnly}
             onPress={() => {
               if (isTracked(node)) {
                 if (loggedToday) {
@@ -650,16 +683,20 @@ export default function GoalScreen({ navigation, route }: Props) {
         {!editing && analysis && !isRepeating(node) ? (
           <View style={styles.analysisCard}>
             <View style={styles.analysisRow}>
-              <Pressable
-                onPress={completeOneTime}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  node.status === 'done' ? 'Mark not done' : 'Mark done'
-                }
-                hitSlop={4}
-              >
+              {readOnly ? (
                 <OneTimeMark status={node.status} />
-              </Pressable>
+              ) : (
+                <Pressable
+                  onPress={completeOneTime}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    node.status === 'done' ? 'Mark not done' : 'Mark done'
+                  }
+                  hitSlop={4}
+                >
+                  <OneTimeMark status={node.status} />
+                </Pressable>
+              )}
               <AnalysisCopy analysis={analysis} />
             </View>
           </View>
@@ -696,7 +733,7 @@ export default function GoalScreen({ navigation, route }: Props) {
               return (
                 <Pressable
                   key={row.id}
-                  onPress={() => navigation.push('Goal', { goalId: item.id })}
+                  onPress={() => openGoal(item.id)}
                   style={({ pressed }) => [
                     styles.treeRow,
                     { paddingLeft: 16 + row.depth * 36 },
@@ -745,11 +782,13 @@ export default function GoalScreen({ navigation, route }: Props) {
                 </Pressable>
               );
             })}
-            {!isRepeating(node) ? <View style={styles.treeAdd}>{addField}</View> : null}
+            {!readOnly && !isRepeating(node) ? (
+              <View style={styles.treeAdd}>{addField}</View>
+            ) : null}
           </View>
         ) : null}
 
-        {!editing && needsSetup ? (
+        {!editing && !readOnly && needsSetup ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Set it up</Text>
             <SetupRow label="Track an amount" onPress={() => setEditing(true)} />
@@ -1037,6 +1076,7 @@ function WeeklyAnalysis({
   today,
   analysis,
   loggedToday,
+  canLog = true,
   onPress,
 }: {
   node: Goal;
@@ -1044,6 +1084,7 @@ function WeeklyAnalysis({
   today: string;
   analysis: { headline: string; detail: string; tone: AnalysisTone };
   loggedToday: boolean;
+  canLog?: boolean;
   onPress: () => void;
 }) {
   const { settings } = useSettings();
@@ -1061,16 +1102,18 @@ function WeeklyAnalysis({
         <AnalysisCopy analysis={analysis} />
       </View>
       <WeekStrip node={node} entries={entries} today={today} />
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityLabel={loggedToday ? 'Logged today. Tap to undo' : 'Log today'}
-      >
-        <Text style={styles.todayButtonText}>
-          {loggedToday ? '✓ Logged today · tap to undo' : 'Log today'}
-        </Text>
-      </Pressable>
+      {canLog ? (
+        <Pressable
+          onPress={onPress}
+          style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={loggedToday ? 'Logged today. Tap to undo' : 'Log today'}
+        >
+          <Text style={styles.todayButtonText}>
+            {loggedToday ? '✓ Logged today · tap to undo' : 'Log today'}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -1197,6 +1240,10 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: '#111',
+  },
+  sharedBy: {
+    fontSize: 13,
+    color: '#6b6b70',
   },
   metaRow: {
     flexDirection: 'row',

@@ -274,6 +274,7 @@ export default function CommunityScreen({ navigation }: Props) {
                       navigation.navigate('Partner', {
                         connectionId: connection.id,
                         name: partnerLabel(connection),
+                        partnerId: connection.partnerId,
                       })
                     }
                     style={({ pressed }) => [styles.row, pressed && styles.pressed]}

@@ -1,10 +1,13 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import CommunityScreen from '../screens/CommunityScreen';
+import GoalScreen from '../screens/GoalScreen';
 import PartnerScreen from '../screens/PartnerScreen';
+import type { GoalRouteParams } from './GoalsStackNavigator';
 
 export type CommunityStackParamList = {
   CommunityMain: undefined;
-  Partner: { connectionId: string; name: string };
+  Partner: { connectionId: string; name: string; partnerId: string | null };
+  Goal: GoalRouteParams;
 };
 
 const Stack = createNativeStackNavigator<CommunityStackParamList>();
@@ -28,6 +31,11 @@ export default function CommunityStackNavigator() {
           title: route.params.name,
           headerTitleAlign: 'center',
         })}
+      />
+      <Stack.Screen
+        name="Goal"
+        component={GoalScreen}
+        options={{ title: '', headerTitleAlign: 'center' }}
       />
     </Stack.Navigator>
   );

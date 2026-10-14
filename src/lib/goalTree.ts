@@ -63,6 +63,78 @@ export function isDaily(goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit'
   return goal.unit != null || goal.targetAmount == null || goal.targetAmount === 7;
 }
 
+/** Clamp a stored times-per-day value to 1–12. Missing values are 1. */
+export function storedTimesPerDay(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value)) {
+    return 1;
+  }
+  const rounded = Math.round(value);
+  if (rounded < 1) {
+    return 1;
+  }
+  if (rounded > 12) {
+    return 12;
+  }
+  return rounded;
+}
+
+/**
+ * How many logs a Daily yes/no step needs before the day counts.
+ * Weekly, monthly, and tracked steps always read as 1.
+ */
+export function timesPerDay(
+  goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit' | 'targetAmount' | 'timesPerDay'>,
+): number {
+  if (goal.unit != null || !isDaily(goal)) {
+    return 1;
+  }
+  return storedTimesPerDay(goal.timesPerDay);
+}
+
+/** Logged count for one entry. No row is 0. A null value is one log. */
+export function dayCount(entry: GoalEntry | null | undefined): number {
+  if (!entry) {
+    return 0;
+  }
+  if (entry.value == null) {
+    return 1;
+  }
+  return entry.value;
+}
+
+export function isDayComplete(
+  goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit' | 'targetAmount' | 'timesPerDay'>,
+  entry: GoalEntry | null | undefined,
+): boolean {
+  if (!entry) {
+    return false;
+  }
+  return dayCount(entry) >= timesPerDay(goal);
+}
+
+export function dayProgress(
+  goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit' | 'targetAmount' | 'timesPerDay'>,
+  entry: GoalEntry | null | undefined,
+): { count: number; needed: number } {
+  return { count: dayCount(entry), needed: timesPerDay(goal) };
+}
+
+export type DayFill = 'none' | 'partial' | 'complete';
+
+/** Complete, partial (some logs, not enough), or nothing logged. */
+export function dayFill(
+  goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit' | 'targetAmount' | 'timesPerDay'>,
+  entry: GoalEntry | null | undefined,
+): DayFill {
+  if (isDayComplete(goal, entry)) {
+    return 'complete';
+  }
+  if (dayCount(entry) > 0) {
+    return 'partial';
+  }
+  return 'none';
+}
+
 /**
  * This step's target expressed as a weekly amount.
  * Weekly yes/no is the target, or the planned-day count (at least 1).
@@ -98,7 +170,7 @@ export function weeklyTarget(
 
 /**
  * This step's own entries in the period containing date.
- * Tracked steps sum values. Yes/no steps count entries.
+ * Tracked steps sum values. Yes/no steps count complete days only.
  */
 export function periodTotal(
   node: Goal,
@@ -118,7 +190,7 @@ export function periodTotal(
     return own.reduce((sum, entry) => sum + (entry.value ?? 0), 0);
   }
 
-  return own.length;
+  return own.filter((entry) => isDayComplete(node, entry)).length;
 }
 
 /** False when the step has no target amount. */
@@ -214,12 +286,14 @@ export function weekTargetFor(
 
 /**
  * Dates that count toward a streak. Tracked steps count a day only when the
- * entry value is greater than zero. Yes/no steps count any entry.
+ * entry value is greater than zero. Yes/no steps count complete days only.
  */
 export function completionDates(node: Goal, entries: GoalEntry[]): string[] {
   return entries
     .filter((entry) => entry.goalId === node.id)
-    .filter((entry) => (isTracked(node) ? (entry.value ?? 0) > 0 : true))
+    .filter((entry) =>
+      isTracked(node) ? (entry.value ?? 0) > 0 : isDayComplete(node, entry),
+    )
     .map((entry) => entry.entryDate);
 }
 

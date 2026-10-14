@@ -1,7 +1,7 @@
 import type { Connection, GoalShare } from '../types/community';
 import type { Goal, GoalEntry, GoalStatus, RepeatPeriod } from '../types/goal';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
-import { buildChildrenMap } from './goalTree';
+import { buildChildrenMap, storedTimesPerDay } from './goalTree';
 import { supabase } from './supabase';
 
 export type SharedGoals = {
@@ -58,6 +58,7 @@ type GoalRow = {
   target_amount: number | string | null;
   repeat_period: string | null;
   planned_days: number[] | null;
+  times_per_day?: number | string | null;
 };
 
 type EntryRow = {
@@ -120,6 +121,7 @@ function mapGoal(row: GoalRow): Goal {
     targetAmount: amountToNumber(row.target_amount) ?? null,
     repeatPeriod: mapRepeatPeriod(row.repeat_period),
     plannedDays: row.planned_days,
+    timesPerDay: storedTimesPerDay(amountToNumber(row.times_per_day) ?? null),
   };
 }
 

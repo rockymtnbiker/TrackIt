@@ -3,9 +3,11 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   FlatList,
+  Platform,
   Modal,
   Pressable,
   ScrollView,
@@ -42,9 +44,13 @@ import {
   buildChildrenMap,
   isLeaf,
   completionDates,
+  dayFill,
+  dayProgress,
+  isDayComplete,
   isRepeating,
   isTracked,
   rollupTotal,
+  timesPerDay,
   weekTargetFor,
 } from '../lib/goalTree';
 import type { WeekStart } from '../lib/settingsApi';
@@ -274,6 +280,20 @@ function buildStepControl(
     return { type: 'continuous', progress, action: 'log' };
   }
 
+  if (timesPerDay(step) > 1) {
+    const entry = entries.find(
+      (item) => item.goalId === step.id && item.entryDate.slice(0, 10) === asOf,
+    );
+    const progress = dayProgress(step, entry);
+    return {
+      type: 'segmented',
+      total: progress.needed,
+      filled: Math.min(progress.needed, progress.count),
+      loggedOnDay: isDayComplete(step, entry),
+      action: 'toggle',
+    };
+  }
+
   const target = weekTarget;
   if (target != null && target > 0 && target <= 7) {
     const total = Math.max(1, Math.round(target));
@@ -340,6 +360,20 @@ function detailSubtitle(
     const period = periodPhrase(step);
     return {
       text: row ? `${amount} ${period}` : amount,
+      overdue: false,
+    };
+  }
+
+  if (row && timesPerDay(step) > 1) {
+    const entry = entries.find(
+      (item) => item.goalId === step.id && item.entryDate.slice(0, 10) === asOf,
+    );
+    const progress = dayProgress(step, entry);
+    return {
+      text:
+        asOf === todayDateString()
+          ? `${progress.count} of ${progress.needed} today`
+          : `${progress.count} of ${progress.needed}`,
       overdue: false,
     };
   }
@@ -1008,6 +1042,9 @@ function controlLabel(
   control: StepControl,
   loggedOnDay: boolean,
 ): string {
+  if (timesPerDay(step) > 1 && control.action === 'toggle') {
+    return loggedOnDay ? 'Done today. Tap to undo' : 'Log a dose';
+  }
   if (control.action === 'log') {
     return 'Log an amount';
   }
@@ -1041,18 +1078,15 @@ function WeekDots({
   const available = new Set(
     weekTargetFor(goal, asOf, weekStartsOn).availableDays.map(dateKey),
   );
-  const logged = new Set(
-    entries
-      .filter(
-        (entry) =>
-          entry.goalId === goal.id &&
-          entry.entryDate <= asOf &&
-          entry.entryDate >= start,
-      )
-      .map((entry) => entry.entryDate),
-  );
+  const byDate = new Map<string, GoalEntry>();
+  for (const entry of entries) {
+    const date = entry.entryDate.slice(0, 10);
+    if (entry.goalId === goal.id && date <= asOf && date >= start) {
+      byDate.set(date, entry);
+    }
+  }
   const doneNames = days
-    .filter((day) => logged.has(day))
+    .filter((day) => dayFill(goal, byDate.get(day)) === 'complete')
     .map((day) => labels[days.indexOf(day)] ?? '');
   const label =
     doneNames.length > 0 ? `Done ${doneNames.join(', ')}` : 'No days done';
@@ -1082,20 +1116,21 @@ function WeekDots({
         }
         const selected = day === asOf;
         const after = day > asOf;
-        const hasEntry = logged.has(day);
+        const fill = dayFill(goal, byDate.get(day));
         return (
           <View key={day} style={styles.weekDotSlot}>
             {selected ? <View style={styles.weekDotRing} /> : null}
-            <View
-              style={[
-                styles.weekDot,
-                after
-                  ? styles.weekDotHollow
-                  : hasEntry
-                    ? styles.weekDotDone
-                    : styles.weekDotMissed,
-              ]}
-            />
+            {after ? (
+              <View style={[styles.weekDot, styles.weekDotHollow]} />
+            ) : fill === 'complete' ? (
+              <View style={[styles.weekDot, styles.weekDotDone]} />
+            ) : fill === 'partial' ? (
+              <View style={[styles.weekDot, styles.weekDotPartial]}>
+                <View style={styles.weekDotPartialFill} />
+              </View>
+            ) : (
+              <View style={[styles.weekDot, styles.weekDotMissed]} />
+            )}
           </View>
         );
       })}
@@ -1438,9 +1473,12 @@ export default function TodayScreen() {
           id: node.id,
           title: node.title,
           tracked,
-          isComplete: entries.some(
-            (entry) =>
-              entry.goalId === node.id && entry.entryDate === selectedDate,
+          isComplete: isDayComplete(
+            node,
+            entries.find(
+              (entry) =>
+                entry.goalId === node.id && entry.entryDate.slice(0, 10) === selectedDate,
+            ),
           ),
           isInteractive: !future,
           met: isPeriodTargetMetAsOf(node, entries, selectedDate, weekStartsOn),
@@ -1572,6 +1610,65 @@ export default function TodayScreen() {
       .finally(() => {
         pendingTogglesRef.current.delete(toggleKey);
       });
+  };
+
+  const handleDose = (step: Goal) => {
+    if (isFutureDate(selectedDate, today)) {
+      return;
+    }
+    const current = entriesRef.current.find(
+      (entry) =>
+        entry.goalId === step.id && entry.entryDate.slice(0, 10) === selectedDate,
+    );
+    const progress = dayProgress(step, current);
+
+    const applyCount = (next: number) => {
+      if (next <= 0) {
+        applyEntryChange(
+          step.id,
+          selectedDate,
+          withoutEntry(entriesRef.current, step.id, selectedDate),
+          deleteEntry(step.id, selectedDate).then(() => undefined),
+        );
+        return;
+      }
+      applyEntryChange(
+        step.id,
+        selectedDate,
+        withUpsertedEntry(entriesRef.current, step.id, selectedDate, next),
+        upsertEntry(step.id, selectedDate, next),
+      );
+    };
+
+    if (progress.count >= progress.needed) {
+      const undo = () => applyCount(progress.count - 1);
+      const clear = () => applyCount(0);
+      if (Platform.OS === 'ios') {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: ['Undo one', 'Clear today', 'Cancel'],
+            cancelButtonIndex: 2,
+            destructiveButtonIndex: 1,
+          },
+          (buttonIndex) => {
+            if (buttonIndex === 0) {
+              undo();
+            } else if (buttonIndex === 1) {
+              clear();
+            }
+          },
+        );
+        return;
+      }
+      Alert.alert('Today', undefined, [
+        { text: 'Undo one', onPress: undo },
+        { text: 'Clear today', style: 'destructive', onPress: clear },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+      return;
+    }
+
+    applyCount(progress.count + 1);
   };
 
   const openLog = (goalId: string) => {
@@ -1856,7 +1953,11 @@ export default function TodayScreen() {
                     return;
                   }
                   if (control.action === 'toggle') {
-                    handleToggle(row);
+                    if (timesPerDay(step) > 1) {
+                      handleDose(step);
+                    } else {
+                      handleToggle(row);
+                    }
                   }
                 };
 
@@ -2170,6 +2271,18 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   weekDotDone: {
+    backgroundColor: '#248A3D',
+  },
+  weekDotPartial: {
+    backgroundColor: '#D1D1D6',
+    overflow: 'hidden',
+  },
+  weekDotPartialFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '50%',
     backgroundColor: '#248A3D',
   },
   weekDotMissed: {

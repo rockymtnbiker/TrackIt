@@ -37,7 +37,7 @@ import {
   targetAmountLabel,
 } from '../lib/goalDetailText';
 import { deleteGoal, setGoalStatus, updateGoal } from '../lib/goalTreeApi';
-import { buildChildrenMap } from '../lib/goalTree';
+import { buildChildrenMap, isDaily, storedTimesPerDay } from '../lib/goalTree';
 import { weekdayOrder } from '../lib/week';
 import { UNIT_OPTIONS } from '../constants';
 import type { Goal, GoalStatus, RepeatPeriod } from '../types/goal';
@@ -63,6 +63,7 @@ type Draft = {
   repeatOn: boolean;
   repeatPeriod: RepeatPeriod;
   plannedDays: number[];
+  timesPerDay: number;
   status: GoalStatus;
   actualStartDate: string;
   actualEndDate: string;
@@ -116,6 +117,7 @@ function draftFromGoal(goal: Goal): Draft {
     repeatOn: goal.plannedDays != null,
     repeatPeriod: goal.repeatPeriod ?? 'week',
     plannedDays: goal.plannedDays ?? [],
+    timesPerDay: storedTimesPerDay(goal.timesPerDay),
     status: goal.status,
     actualStartDate: goal.actualStartDate ?? '',
     actualEndDate: goal.actualEndDate ?? '',
@@ -137,6 +139,18 @@ function snapshot(draft: Draft): string {
     actualEndDate: draft.actualEndDate.trim(),
     targetStartDate: draft.targetStartDate.trim(),
     targetEndDate: draft.targetEndDate.trim(),
+  });
+}
+
+function doseDailyFromDraft(draft: Draft): boolean {
+  if (draft.trackOn || !draft.repeatOn) {
+    return false;
+  }
+  return isDaily({
+    repeatPeriod: draft.repeatPeriod,
+    plannedDays: draft.plannedDays,
+    unit: null,
+    targetAmount: parseAmount(draft.target),
   });
 }
 
@@ -262,6 +276,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
       targetAmount: amount,
       repeatPeriod: current.repeatOn ? current.repeatPeriod : null,
       plannedDays: current.repeatOn ? current.plannedDays : null,
+      timesPerDay: doseDailyFromDraft(current) ? storedTimesPerDay(current.timesPerDay) : 1,
       ...(current.actualStartDate.trim()
         ? {
             actualStartDate:
@@ -572,9 +587,51 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
                   })}
                 </View>
               </View>
-              {!draft.trackOn
-                ? amountField(targetAmountLabel(false, true, draft.repeatPeriod))
-                : null}
+              {doseDailyFromDraft(draft) ? (
+                <View style={styles.formStackedBlock}>
+                  <Text style={formFieldStyles.formFieldLabel}>Times per day</Text>
+                  <View style={styles.stepper}>
+                    <Pressable
+                      onPress={() =>
+                        patch({
+                          timesPerDay: Math.max(1, draft.timesPerDay - 1),
+                        })
+                      }
+                      disabled={draft.timesPerDay <= 1}
+                      style={({ pressed }) => [
+                        styles.stepperButton,
+                        draft.timesPerDay <= 1 && styles.stepperButtonDisabled,
+                        pressed && draft.timesPerDay > 1 && styles.pressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Fewer times per day"
+                    >
+                      <Text style={styles.stepperButtonText}>−</Text>
+                    </Pressable>
+                    <Text style={styles.stepperValue}>{draft.timesPerDay}</Text>
+                    <Pressable
+                      onPress={() =>
+                        patch({
+                          timesPerDay: Math.min(12, draft.timesPerDay + 1),
+                        })
+                      }
+                      disabled={draft.timesPerDay >= 12}
+                      style={({ pressed }) => [
+                        styles.stepperButton,
+                        draft.timesPerDay >= 12 && styles.stepperButtonDisabled,
+                        pressed && draft.timesPerDay < 12 && styles.pressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="More times per day"
+                    >
+                      <Text style={styles.stepperButtonText}>+</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.hint}>e.g. 3 for morning, noon and night</Text>
+                </View>
+              ) : !draft.trackOn ? (
+                amountField(targetAmountLabel(false, true, draft.repeatPeriod))
+              ) : null}
             </View>
           ) : null}
         </DetailCard>
@@ -715,6 +772,34 @@ const styles = StyleSheet.create({
   },
   formStackedBlock: {
     gap: 6,
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stepperButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F2F2F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperButtonDisabled: {
+    opacity: 0.35,
+  },
+  stepperButtonText: {
+    fontSize: 22,
+    fontWeight: '500',
+    color: '#007aff',
+  },
+  stepperValue: {
+    minWidth: 28,
+    textAlign: 'center',
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#1c1c1e',
   },
   hairlineRow: {
     borderBottomWidth: StyleSheet.hairlineWidth,

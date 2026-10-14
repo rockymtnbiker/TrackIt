@@ -6,7 +6,7 @@ import type {
 } from '../types/goal';
 import { todayDateString } from '../utils/date';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
-import { isRepeating } from './goalTree';
+import { isRepeating, storedTimesPerDay } from './goalTree';
 import { captureStatusDates } from './statusDates';
 import { supabase } from './supabase';
 
@@ -30,6 +30,7 @@ type GoalRow = {
   target_amount: number | string | null;
   repeat_period: string | null;
   planned_days: number[] | null;
+  times_per_day?: number | string | null;
 };
 
 export type GoalInput = {
@@ -47,6 +48,7 @@ export type GoalInput = {
   targetAmount?: number | null;
   repeatPeriod?: RepeatPeriod | null;
   plannedDays?: number[] | null;
+  timesPerDay?: number | null;
 };
 
 export type GoalUpdates = Partial<
@@ -116,6 +118,7 @@ function mapRowToNode(row: GoalRow): Goal {
     targetAmount: amountToNumber(row.target_amount) ?? null,
     repeatPeriod: mapRepeatPeriod(row.repeat_period),
     plannedDays: row.planned_days,
+    timesPerDay: storedTimesPerDay(amountToNumber(row.times_per_day) ?? null),
   };
 }
 
@@ -344,6 +347,9 @@ export async function updateGoal(
   }
   if (updates.sortOrder !== undefined) {
     row.sort_order = updates.sortOrder;
+  }
+  if (updates.timesPerDay !== undefined) {
+    row.times_per_day = storedTimesPerDay(updates.timesPerDay);
   }
 
   const touchesRepeat =

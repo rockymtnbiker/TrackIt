@@ -3,9 +3,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -39,11 +41,15 @@ import {
 } from '../lib/goalTreeApi';
 import {
   buildChildrenMap,
+  dayFill,
+  dayProgress,
   goalStartDate,
   isDaily,
+  isDayComplete,
   isRepeating,
   isTracked,
   rollupTotal,
+  timesPerDay,
   weekTargetFor,
   weeklyTarget,
 } from '../lib/goalTree';
@@ -388,6 +394,74 @@ export default function GoalScreen({ navigation, route }: Props) {
     setLogError(null);
   };
 
+  const logDose = () => {
+    if (!node || entryBusy.current) {
+      return;
+    }
+    const entry = entries.find(
+      (item) =>
+        item.goalId === node.id && item.entryDate.slice(0, 10) === today,
+    );
+    const progress = dayProgress(node, entry);
+
+    const applyCount = (next: number) => {
+      const previous = entries;
+      entryBusy.current = true;
+      if (next <= 0) {
+        replaceEntries(node.id, today, undefined);
+        void deleteEntry(node.id, today)
+          .catch((error) => {
+            console.warn('Failed to update today', error);
+            setEntries(previous);
+          })
+          .finally(() => {
+            entryBusy.current = false;
+          });
+        return;
+      }
+      replaceEntries(node.id, today, next);
+      void upsertEntry(node.id, today, next)
+        .then(applyUpsert)
+        .catch((error) => {
+          console.warn('Failed to update today', error);
+          setEntries(previous);
+        })
+        .finally(() => {
+          entryBusy.current = false;
+        });
+    };
+
+    if (progress.count >= progress.needed) {
+      const undo = () => applyCount(progress.count - 1);
+      const clear = () => applyCount(0);
+      if (Platform.OS === 'ios') {
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: ['Undo one', 'Clear today', 'Cancel'],
+            cancelButtonIndex: 2,
+            destructiveButtonIndex: 1,
+          },
+          (buttonIndex) => {
+            if (buttonIndex === 0) {
+              undo();
+            } else if (buttonIndex === 1) {
+              clear();
+            }
+          },
+        );
+        return;
+      }
+      Alert.alert('Today', undefined, [
+        { text: 'Undo one', onPress: undo },
+        { text: 'Clear today', style: 'destructive', onPress: clear },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+      return;
+    }
+
+    applyCount(progress.count + 1);
+  };
+
   const saveLog = () => {
     if (!node || entryBusy.current) {
       return;
@@ -513,9 +587,14 @@ export default function GoalScreen({ navigation, route }: Props) {
       : null;
   const streaks = goalStreaks(node, entries, today, weekStartsOn);
   const whyText = node.why?.trim() ?? '';
-  const loggedToday = entries.some(
+  const todayEntry = entries.find(
     (entry) => entry.goalId === node.id && entry.entryDate.slice(0, 10) === today,
   );
+  const loggedToday = isTracked(node)
+    ? todayEntry != null
+    : isDayComplete(node, todayEntry);
+  const doses = timesPerDay(node);
+  const doseProgress = dayProgress(node, todayEntry);
   const needsSetup =
     !isTracked(node) && !isRepeating(node) && children.length === 0;
   const addField = (
@@ -665,6 +744,13 @@ export default function GoalScreen({ navigation, route }: Props) {
             today={today}
             analysis={analysis}
             loggedToday={loggedToday}
+            doseLabel={
+              doses > 1
+                ? doseProgress.count >= doseProgress.needed
+                  ? '✓ Done today · tap to undo'
+                  : `Log dose · ${doseProgress.count} of ${doseProgress.needed} today`
+                : null
+            }
             canLog={!readOnly}
             onPress={() => {
               if (isTracked(node)) {
@@ -673,6 +759,10 @@ export default function GoalScreen({ navigation, route }: Props) {
                 } else {
                   openLog();
                 }
+                return;
+              }
+              if (doses > 1) {
+                logDose();
                 return;
               }
               toggleToday(false);
@@ -1022,16 +1112,13 @@ function WeekStrip({
   const available = new Set(
     weekTargetFor(node, today, weekStartsOn).availableDays.map(dateKey),
   );
-  const logged = new Set(
-    entries
-      .filter(
-        (entry) =>
-          entry.goalId === node.id &&
-          entry.entryDate.slice(0, 10) <= today &&
-          entry.entryDate.slice(0, 10) >= start,
-      )
-      .map((entry) => entry.entryDate.slice(0, 10)),
-  );
+  const byDate = new Map<string, GoalEntry>();
+  for (const entry of entries) {
+    const date = entry.entryDate.slice(0, 10);
+    if (entry.goalId === node.id && date <= today && date >= start) {
+      byDate.set(date, entry);
+    }
+  }
 
   return (
     <View style={styles.weekStrip}>
@@ -1053,16 +1140,21 @@ function WeekStrip({
         }
         const isToday = day === today;
         const after = day > today;
-        const hasEntry = logged.has(day);
+        const fill = dayFill(node, byDate.get(day));
         return (
           <View key={day} style={styles.dotSlot}>
             {isToday ? <View style={styles.dotRing} /> : null}
-            <View
-              style={[
-                styles.dot,
-                after ? styles.dotHollow : hasEntry ? styles.dotDone : styles.dotMissed,
-              ]}
-            />
+            {after ? (
+              <View style={[styles.dot, styles.dotHollow]} />
+            ) : fill === 'complete' ? (
+              <View style={[styles.dot, styles.dotDone]} />
+            ) : fill === 'partial' ? (
+              <View style={[styles.dot, styles.dotPartial]}>
+                <View style={styles.dotPartialFill} />
+              </View>
+            ) : (
+              <View style={[styles.dot, styles.dotMissed]} />
+            )}
           </View>
         );
       })}
@@ -1076,6 +1168,7 @@ function WeeklyAnalysis({
   today,
   analysis,
   loggedToday,
+  doseLabel = null,
   canLog = true,
   onPress,
 }: {
@@ -1084,6 +1177,7 @@ function WeeklyAnalysis({
   today: string;
   analysis: { headline: string; detail: string; tone: AnalysisTone };
   loggedToday: boolean;
+  doseLabel?: string | null;
   canLog?: boolean;
   onPress: () => void;
 }) {
@@ -1107,10 +1201,12 @@ function WeeklyAnalysis({
           onPress={onPress}
           style={({ pressed }) => [styles.todayButton, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel={loggedToday ? 'Logged today. Tap to undo' : 'Log today'}
+          accessibilityLabel={
+            doseLabel ?? (loggedToday ? 'Logged today. Tap to undo' : 'Log today')
+          }
         >
           <Text style={styles.todayButtonText}>
-            {loggedToday ? '✓ Logged today · tap to undo' : 'Log today'}
+            {doseLabel ?? (loggedToday ? '✓ Logged today · tap to undo' : 'Log today')}
           </Text>
         </Pressable>
       ) : null}
@@ -1465,6 +1561,18 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   dotDone: {
+    backgroundColor: '#248A3D',
+  },
+  dotPartial: {
+    backgroundColor: '#D1D1D6',
+    overflow: 'hidden',
+  },
+  dotPartialFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '50%',
     backgroundColor: '#248A3D',
   },
   dotMissed: {

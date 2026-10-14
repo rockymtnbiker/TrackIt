@@ -24,6 +24,7 @@ import {
 } from '../lib/goalAnalysis';
 import {
   buildChildrenMap,
+  dayFill,
   goalStartDate,
   isLeaf,
   isRepeating,
@@ -487,14 +488,13 @@ function WeekDots({
   const available = new Set(
     weekTargetFor(goal, asOf, weekStartsOn).availableDays.map(dateKey),
   );
-  const logged = new Set(
-    entries
-      .filter((entry) => {
-        const date = entry.entryDate.slice(0, 10);
-        return entry.goalId === goal.id && date <= asOf && date >= start;
-      })
-      .map((entry) => entry.entryDate.slice(0, 10)),
-  );
+  const byDate = new Map<string, GoalEntry>();
+  for (const entry of entries) {
+    const date = entry.entryDate.slice(0, 10);
+    if (entry.goalId === goal.id && date <= asOf && date >= start) {
+      byDate.set(date, entry);
+    }
+  }
 
   return (
     <View style={styles.weekDots} pointerEvents="none">
@@ -516,20 +516,21 @@ function WeekDots({
         }
         const selected = day === asOf;
         const after = day > asOf;
-        const hasEntry = logged.has(day);
+        const fill = dayFill(goal, byDate.get(day));
         return (
           <View key={day} style={styles.weekDotSlot}>
             {selected ? <View style={styles.weekDotRing} /> : null}
-            <View
-              style={[
-                styles.weekDot,
-                after
-                  ? styles.weekDotHollow
-                  : hasEntry
-                    ? styles.weekDotDone
-                    : styles.weekDotMissed,
-              ]}
-            />
+            {after ? (
+              <View style={[styles.weekDot, styles.weekDotHollow]} />
+            ) : fill === 'complete' ? (
+              <View style={[styles.weekDot, styles.weekDotDone]} />
+            ) : fill === 'partial' ? (
+              <View style={[styles.weekDot, styles.weekDotPartial]}>
+                <View style={styles.weekDotPartialFill} />
+              </View>
+            ) : (
+              <View style={[styles.weekDot, styles.weekDotMissed]} />
+            )}
           </View>
         );
       })}
@@ -1494,6 +1495,18 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   weekDotDone: {
+    backgroundColor: '#248A3D',
+  },
+  weekDotPartial: {
+    backgroundColor: '#D1D1D6',
+    overflow: 'hidden',
+  },
+  weekDotPartialFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '50%',
     backgroundColor: '#248A3D',
   },
   weekDotMissed: {

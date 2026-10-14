@@ -1,6 +1,6 @@
 import type { Goal, GoalStatus, RepeatPeriod } from '../types/goal';
 import { formatDateMDY } from '../utils/date';
-import { isDaily } from './goalTree';
+import { isDaily, timesPerDay } from './goalTree';
 import type { WeekStart } from './settingsApi';
 import { weekdayOrder } from './week';
 
@@ -158,7 +158,13 @@ export function goalDetailSections(goal: Goal, weekStartsOn: WeekStart): DetailS
 
   const repeatRows: DetailRow[] = repeating
     ? [
-        { label: DETAIL_LABELS.period, value: repeatPeriodLabel(choice) },
+        {
+          label: DETAIL_LABELS.period,
+          value:
+            choice === 'daily' && timesPerDay(goal) > 1
+              ? `Daily · ${timesPerDay(goal)} times a day`
+              : repeatPeriodLabel(choice),
+        },
         { label: DETAIL_LABELS.days, value: formatPlannedDays(goal.plannedDays, weekStartsOn) },
         ...(tracked
           ? []

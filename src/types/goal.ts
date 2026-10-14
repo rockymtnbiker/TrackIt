@@ -21,6 +21,8 @@ export type Goal = {
   targetAmount: number | null;
   repeatPeriod: RepeatPeriod | null;
   plannedDays: number[] | null;
+  /** Stored 1–12. Only Daily yes/no steps use a value above 1. */
+  timesPerDay: number;
 };
 
 export type GoalEntry = {

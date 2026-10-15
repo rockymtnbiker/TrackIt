@@ -106,7 +106,9 @@ function progressDetail(
   const averageText = average == null ? null : `6-week average ${average}%`;
   const amount = isTracked(node)
     ? `${formatQty(total)} / ${target == null ? '—' : formatQty(target)} ${node.unit ?? ''}`.trim()
-    : `${formatQty(total)} of ${target == null ? '—' : formatQty(target)} days`;
+    : isDaily(node)
+      ? `${formatQty(total)} of ${target == null ? '—' : formatQty(target)} days`
+      : `${formatQty(total)} of ${target == null ? '—' : formatQty(target)}`;
   return averageText ? `${amount} · ${averageText}` : amount;
 }
 
@@ -142,7 +144,7 @@ function weeklyAnalysis(
 
   const remaining = target - total;
   const daysLeft = availableDays.filter((day) => dateKey(day) >= today).length;
-  const cantFinish = !isTracked(node) && remaining > daysLeft;
+  const cantFinish = isDaily(node) && !isTracked(node) && remaining > daysLeft;
   if (cantFinish) {
     return { headline: "Can't finish this week", detail: stats, tone: 'warn' };
   }
@@ -304,6 +306,18 @@ function leafCounts(
   return { done, total };
 }
 
+/** Progress line for a goal that has steps. Status labels stay separate. */
+export function bigDealStepLine(done: number, total: number, active: number): string {
+  if (done === 0 && active > 0) {
+    return `${active} ${active === 1 ? 'step' : 'steps'} in progress`;
+  }
+  if (total > 0 && done === total) {
+    return `All ${total} ${total === 1 ? 'step' : 'steps'} done`;
+  }
+  const stepWord = total === 1 ? 'step' : 'steps';
+  return `${done} of ${total} ${stepWord} done`;
+}
+
 /** Leaf completion for a goal that has children. Null when it has none. */
 export function bigDealSummary(
   node: Goal,
@@ -329,9 +343,9 @@ export function bigDealSummary(
   walkLeaves(node.id);
 
   const overdue = leaves.filter((leaf) => leafOverdue(leaf, today)).length;
+  const active = leaves.filter((leaf) => leaf.status === 'active').length;
   const complete = counts.total > 0 && counts.done === counts.total;
   const next = leaves.find((leaf) => leaf.status !== 'done') ?? null;
-  const stepWord = counts.total === 1 ? 'step' : 'steps';
 
   let detail = 'On track';
   let tone: AnalysisTone = 'good';
@@ -343,7 +357,7 @@ export function bigDealSummary(
   }
 
   return {
-    headline: `${counts.done} of ${counts.total} ${stepWord} done`,
+    headline: bigDealStepLine(counts.done, counts.total, active),
     detail,
     tone,
     done: counts.done,

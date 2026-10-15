@@ -34,6 +34,8 @@ import {
 import { getAllGoals } from '../lib/goalTreeApi';
 import {
   buildChildrenMap,
+  dayFill,
+  daySessionMark,
   goalStartDate,
   isRepeating,
   isTracked,
@@ -98,15 +100,6 @@ function WeekDots({
   const available = new Set(
     weekTargetFor(goal, asOf, weekStartsOn).availableDays.map(dateKey),
   );
-  const logged = new Set(
-    entries
-      .filter((entry) => {
-        const date = entry.entryDate.slice(0, 10);
-        return entry.goalId === goal.id && date <= asOf && date >= start;
-      })
-      .map((entry) => entry.entryDate.slice(0, 10)),
-  );
-
   return (
     <View style={styles.weekDots} pointerEvents="none">
       {days.map((day) => {
@@ -122,20 +115,27 @@ function WeekDots({
         }
         const selected = day === asOf;
         const after = day > asOf;
-        const hasEntry = logged.has(day);
+        const fill = dayFill(goal, entries, day);
+        const sessions = after || day < start ? null : daySessionMark(goal, entries, day);
         return (
           <View key={day} style={styles.weekDotSlot}>
-            {selected ? <View style={styles.weekDotRing} /> : null}
-            <View
-              style={[
-                styles.weekDot,
-                after
-                  ? styles.weekDotHollow
-                  : hasEntry
-                    ? styles.weekDotDone
-                    : styles.weekDotMissed,
-              ]}
-            />
+            <View style={styles.weekDotBox}>
+              {selected ? <View style={styles.weekDotRing} /> : null}
+              {after ? (
+                <View style={[styles.weekDot, styles.weekDotHollow]} />
+              ) : fill === 'complete' ? (
+                <View style={[styles.weekDot, styles.weekDotDone]} />
+              ) : fill === 'partial' ? (
+                <View style={[styles.weekDot, styles.weekDotPartial]}>
+                  <View style={styles.weekDotPartialFill} />
+                </View>
+              ) : (
+                <View style={[styles.weekDot, styles.weekDotMissed]} />
+              )}
+            </View>
+            {sessions != null ? (
+              <Text style={styles.weekDotSessions}>{`×${sessions}`}</Text>
+            ) : null}
           </View>
         );
       })}
@@ -688,6 +688,10 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   weekDotSlot: {
+    width: 16,
+    alignItems: 'center',
+  },
+  weekDotBox: {
     width: 8,
     height: 8,
     alignItems: 'center',
@@ -700,6 +704,25 @@ const styles = StyleSheet.create({
   },
   weekDotDone: {
     backgroundColor: '#248A3D',
+  },
+  weekDotPartial: {
+    backgroundColor: '#D1D1D6',
+    overflow: 'hidden',
+  },
+  weekDotPartialFill: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '50%',
+    backgroundColor: '#248A3D',
+  },
+  weekDotSessions: {
+    marginTop: 1,
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: '600',
+    color: '#248A3D',
   },
   weekDotMissed: {
     backgroundColor: '#D1D1D6',

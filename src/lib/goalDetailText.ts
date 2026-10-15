@@ -130,6 +130,29 @@ export type DetailSection = {
 };
 
 /** Read-only lines for the Goal page detail cards. Same labels as the edit form. */
+function timesPhrase(count: number, unit: 'day' | 'week' | 'month'): string {
+  const word = count === 1 ? 'time' : 'times';
+  return `${count} ${word} a ${unit}`;
+}
+
+function repeatSummary(goal: Goal, choice: PeriodChoice | null): string {
+  const label = repeatPeriodLabel(choice);
+  if (goal.unit != null || choice == null) {
+    return label;
+  }
+  if (choice === 'daily') {
+    const count = timesPerDay(goal);
+    return count > 1 ? `Daily · ${timesPhrase(count, 'day')}` : label;
+  }
+  if (choice === 'week') {
+    const stored = goal.targetAmount != null && goal.targetAmount > 0 ? goal.targetAmount : null;
+    const count = stored ?? (goal.plannedDays?.length ?? 0);
+    return count > 0 ? `Weekly · ${timesPhrase(count, 'week')}` : label;
+  }
+  const count = goal.targetAmount != null && goal.targetAmount > 0 ? goal.targetAmount : 0;
+  return count > 0 ? `Monthly · ${timesPhrase(count, 'month')}` : label;
+}
+
 export function goalDetailSections(goal: Goal, weekStartsOn: WeekStart): DetailSection[] {
   const repeating = goal.plannedDays != null;
   const tracked = goal.unit != null;
@@ -158,22 +181,8 @@ export function goalDetailSections(goal: Goal, weekStartsOn: WeekStart): DetailS
 
   const repeatRows: DetailRow[] = repeating
     ? [
-        {
-          label: DETAIL_LABELS.period,
-          value:
-            choice === 'daily' && timesPerDay(goal) > 1
-              ? `Daily · ${timesPerDay(goal)} times a day`
-              : repeatPeriodLabel(choice),
-        },
+        { label: DETAIL_LABELS.period, value: repeatSummary(goal, choice) },
         { label: DETAIL_LABELS.days, value: formatPlannedDays(goal.plannedDays, weekStartsOn) },
-        ...(tracked
-          ? []
-          : [
-              {
-                label: targetAmountLabel(false, true, period),
-                value: formatAmount(goal.targetAmount),
-              },
-            ]),
       ]
     : [{ label: DETAIL_LABELS.repeat, value: DETAIL_LABELS.off }];
 

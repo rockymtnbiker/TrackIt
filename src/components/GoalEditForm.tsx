@@ -37,6 +37,7 @@ import {
   targetAmountLabel,
 } from '../lib/goalDetailText';
 import { deleteGoal, setGoalStatus, updateGoal } from '../lib/goalTreeApi';
+import { TimesStepper } from './TimesStepper';
 import { buildChildrenMap, isDaily, storedTimesPerDay } from '../lib/goalTree';
 import { weekdayOrder } from '../lib/week';
 import { UNIT_OPTIONS } from '../constants';
@@ -64,6 +65,7 @@ type Draft = {
   repeatPeriod: RepeatPeriod;
   plannedDays: number[];
   timesPerDay: number;
+  repeatCount: number;
   status: GoalStatus;
   actualStartDate: string;
   actualEndDate: string;
@@ -118,6 +120,7 @@ function draftFromGoal(goal: Goal): Draft {
     repeatPeriod: goal.repeatPeriod ?? 'week',
     plannedDays: goal.plannedDays ?? [],
     timesPerDay: storedTimesPerDay(goal.timesPerDay),
+    repeatCount: initialRepeatCount(goal),
     status: goal.status,
     actualStartDate: goal.actualStartDate ?? '',
     actualEndDate: goal.actualEndDate ?? '',
@@ -140,6 +143,41 @@ function snapshot(draft: Draft): string {
     targetStartDate: draft.targetStartDate.trim(),
     targetEndDate: draft.targetEndDate.trim(),
   });
+}
+
+function repeatMax(choice: 'daily' | 'week' | 'month'): number {
+  if (choice === 'daily') {
+    return 12;
+  }
+  if (choice === 'month') {
+    return 60;
+  }
+  return 21;
+}
+
+function clampRepeat(choice: 'daily' | 'week' | 'month', value: number): number {
+  const rounded = Math.round(value);
+  if (!Number.isFinite(rounded) || rounded < 1) {
+    return 1;
+  }
+  return Math.min(repeatMax(choice), rounded);
+}
+
+function initialRepeatCount(goal: Goal): number {
+  if (goal.unit == null && isDaily(goal)) {
+    return storedTimesPerDay(goal.timesPerDay);
+  }
+  if (goal.repeatPeriod === 'month') {
+    if (goal.targetAmount != null && goal.targetAmount > 0) {
+      return clampRepeat('month', goal.targetAmount);
+    }
+    return 1;
+  }
+  if (goal.targetAmount != null && goal.targetAmount > 0) {
+    return clampRepeat('week', goal.targetAmount);
+  }
+  const planned = goal.plannedDays?.length ?? 0;
+  return planned > 0 ? clampRepeat('week', planned) : 1;
 }
 
 function doseDailyFromDraft(draft: Draft): boolean {
@@ -265,8 +303,20 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
     }
 
     const unit = resolvedUnit(current);
-    const amount =
-      !current.trackOn && !current.repeatOn ? null : parseAmount(current.target);
+    const dailyYesNo = doseDailyFromDraft(current);
+    const yesNo = current.repeatOn && !current.trackOn;
+    const repeatChoice = current.repeatPeriod === 'month' ? 'month' : 'week';
+    const repeatCount = clampRepeat(
+      dailyYesNo ? 'daily' : repeatChoice,
+      current.repeatCount,
+    );
+    const amount = !current.repeatOn && !current.trackOn
+      ? null
+      : current.trackOn
+        ? parseAmount(current.target)
+        : dailyYesNo
+          ? null
+          : repeatCount;
     const today = todayDateString();
     const payload = {
       title: trimmedTitle,
@@ -276,7 +326,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
       targetAmount: amount,
       repeatPeriod: current.repeatOn ? current.repeatPeriod : null,
       plannedDays: current.repeatOn ? current.plannedDays : null,
-      timesPerDay: doseDailyFromDraft(current) ? storedTimesPerDay(current.timesPerDay) : 1,
+      timesPerDay: yesNo && dailyYesNo ? repeatCount : 1,
       ...(current.actualStartDate.trim()
         ? {
             actualStartDate:
@@ -360,13 +410,21 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
     const next = draft.plannedDays.includes(day)
       ? draft.plannedDays.filter((entry) => entry !== day)
       : [...draft.plannedDays, day].sort((a, b) => a - b);
-    const allSelected = ALL_PLANNED_DAYS.every((value) => next.includes(value));
+    const becomingDaily =
+      !draft.trackOn &&
+      draft.repeatPeriod !== 'month' &&
+      ALL_PLANNED_DAYS.every((value) => next.includes(value));
+    const leavingDaily = doseDailyFromDraft(draft) && !becomingDaily;
+    const repeatCount = becomingDaily
+      ? clampRepeat('daily', draft.repeatCount)
+      : leavingDaily
+        ? clampRepeat('week', draft.repeatCount)
+        : draft.repeatCount;
     patch({
       plannedDays: next,
-      target:
-        allSelected && !draft.trackOn && draft.repeatPeriod !== 'month'
-          ? ''
-          : draft.target,
+      repeatCount,
+      timesPerDay: becomingDaily ? repeatCount : leavingDaily ? 1 : draft.timesPerDay,
+      target: becomingDaily && !draft.trackOn ? '' : draft.target,
     });
   };
 
@@ -542,18 +600,40 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
                 options={[...PERIOD_OPTIONS]}
                 onChange={(value) => {
                   if (value === 'month') {
-                    patch({ repeatPeriod: 'month' });
+                    patch({
+                      repeatPeriod: 'month',
+                      repeatCount: clampRepeat('month', draft.repeatCount),
+                      timesPerDay: 1,
+                    });
                     return;
                   }
                   if (value === 'daily') {
+                    const repeatCount = clampRepeat('daily', draft.repeatCount);
                     patch({
                       repeatPeriod: 'week',
                       plannedDays: [...ALL_PLANNED_DAYS],
                       target: draft.trackOn ? draft.target : '',
+                      repeatCount,
+                      timesPerDay: draft.trackOn ? draft.timesPerDay : repeatCount,
                     });
                     return;
                   }
-                  patch({ repeatPeriod: 'week' });
+                  const stillDaily =
+                    !draft.trackOn &&
+                    isDaily({
+                      repeatPeriod: 'week',
+                      plannedDays: draft.plannedDays,
+                      unit: null,
+                      targetAmount: null,
+                    });
+                  if (stillDaily) {
+                    return;
+                  }
+                  patch({
+                    repeatPeriod: 'week',
+                    repeatCount: clampRepeat('week', draft.repeatCount),
+                    timesPerDay: 1,
+                  });
                 }}
               />
               <View style={styles.formStackedBlock}>
@@ -587,50 +667,32 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
                   })}
                 </View>
               </View>
-              {doseDailyFromDraft(draft) ? (
-                <View style={styles.formStackedBlock}>
-                  <Text style={formFieldStyles.formFieldLabel}>Times per day</Text>
-                  <View style={styles.stepper}>
-                    <Pressable
-                      onPress={() =>
-                        patch({
-                          timesPerDay: Math.max(1, draft.timesPerDay - 1),
-                        })
-                      }
-                      disabled={draft.timesPerDay <= 1}
-                      style={({ pressed }) => [
-                        styles.stepperButton,
-                        draft.timesPerDay <= 1 && styles.stepperButtonDisabled,
-                        pressed && draft.timesPerDay > 1 && styles.pressed,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Fewer times per day"
-                    >
-                      <Text style={styles.stepperButtonText}>−</Text>
-                    </Pressable>
-                    <Text style={styles.stepperValue}>{draft.timesPerDay}</Text>
-                    <Pressable
-                      onPress={() =>
-                        patch({
-                          timesPerDay: Math.min(12, draft.timesPerDay + 1),
-                        })
-                      }
-                      disabled={draft.timesPerDay >= 12}
-                      style={({ pressed }) => [
-                        styles.stepperButton,
-                        draft.timesPerDay >= 12 && styles.stepperButtonDisabled,
-                        pressed && draft.timesPerDay < 12 && styles.pressed,
-                      ]}
-                      accessibilityRole="button"
-                      accessibilityLabel="More times per day"
-                    >
-                      <Text style={styles.stepperButtonText}>+</Text>
-                    </Pressable>
-                  </View>
-                  <Text style={styles.hint}>e.g. 3 for morning, noon and night</Text>
-                </View>
-              ) : !draft.trackOn ? (
-                amountField(targetAmountLabel(false, true, draft.repeatPeriod))
+              {!draft.trackOn ? (
+                <TimesStepper
+                  label={
+                    periodChoice === 'daily'
+                      ? 'Times per day'
+                      : periodChoice === 'month'
+                        ? 'Times per month'
+                        : 'Times per week'
+                  }
+                  value={draft.repeatCount}
+                  min={1}
+                  max={
+                    periodChoice === 'daily' ? 12 : periodChoice === 'month' ? 60 : 21
+                  }
+                  onChange={(repeatCount) =>
+                    patch({
+                      repeatCount,
+                      timesPerDay: periodChoice === 'daily' ? repeatCount : draft.timesPerDay,
+                    })
+                  }
+                  hint={
+                    periodChoice === 'daily'
+                      ? 'e.g. 3 for morning, noon and night'
+                      : undefined
+                  }
+                />
               ) : null}
             </View>
           ) : null}
@@ -772,34 +834,6 @@ const styles = StyleSheet.create({
   },
   formStackedBlock: {
     gap: 6,
-  },
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  stepperButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#F2F2F7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepperButtonDisabled: {
-    opacity: 0.35,
-  },
-  stepperButtonText: {
-    fontSize: 22,
-    fontWeight: '500',
-    color: '#007aff',
-  },
-  stepperValue: {
-    minWidth: 28,
-    textAlign: 'center',
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#1c1c1e',
   },
   hairlineRow: {
     borderBottomWidth: StyleSheet.hairlineWidth,

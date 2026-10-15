@@ -182,6 +182,7 @@ function rolledUpEntries(
     goalId: node.id,
     entryDate: date,
     value,
+    createdAt: date,
   }));
 }
 

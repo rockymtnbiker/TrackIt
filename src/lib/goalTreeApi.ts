@@ -63,6 +63,7 @@ type EntryRow = {
   goal_id: string;
   entry_date: string;
   value: number | string | null;
+  created_at?: string | null;
 };
 
 function blankToNull(value: string | null | undefined): string | null {
@@ -122,12 +123,15 @@ function mapRowToNode(row: GoalRow): Goal {
   };
 }
 
+const ENTRY_COLUMNS = 'id, goal_id, entry_date, value, created_at';
+
 function mapRowToEntry(row: EntryRow): GoalEntry {
   return {
     id: row.id,
     goalId: row.goal_id,
     entryDate: row.entry_date.slice(0, 10),
     value: amountToNumber(row.value) ?? null,
+    createdAt: row.created_at ?? '',
   };
 }
 
@@ -489,7 +493,7 @@ export async function getEntries(
   const userId = ownerId ?? (await requireUserId());
   let query = supabase
     .from(ENTRIES_TABLE)
-    .select('id, goal_id, entry_date, value')
+    .select(ENTRY_COLUMNS)
     .eq('user_id', userId)
     .in('goal_id', goalIds)
     .order('entry_date', { ascending: true });
@@ -572,7 +576,8 @@ async function activatePendingOnLog(
   return changed;
 }
 
-export async function upsertEntry(
+/** Insert one log. A second row for the same day is a new session, not an update. */
+export async function insertEntry(
   goalId: string,
   entryDate: string,
   value: number | null,
@@ -580,16 +585,13 @@ export async function upsertEntry(
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from(ENTRIES_TABLE)
-    .upsert(
-      {
-        user_id: userId,
-        goal_id: goalId,
-        entry_date: entryDate,
-        value,
-      },
-      { onConflict: 'goal_id,entry_date' },
-    )
-    .select('id, goal_id, entry_date, value')
+    .insert({
+      user_id: userId,
+      goal_id: goalId,
+      entry_date: entryDate.slice(0, 10),
+      value,
+    })
+    .select(ENTRY_COLUMNS)
     .single();
 
   if (error) {
@@ -603,6 +605,7 @@ export async function upsertEntry(
   return { entry, goals };
 }
 
+/** Delete every log for one step on one day. */
 export async function deleteEntry(
   goalId: string,
   entryDate: string,
@@ -613,7 +616,21 @@ export async function deleteEntry(
     .delete()
     .eq('user_id', userId)
     .eq('goal_id', goalId)
-    .eq('entry_date', entryDate);
+    .eq('entry_date', entryDate.slice(0, 10));
+
+  if (error) {
+    throw error;
+  }
+}
+
+/** Delete one log row. */
+export async function deleteEntryById(entryId: string): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await supabase
+    .from(ENTRIES_TABLE)
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', entryId);
 
   if (error) {
     throw error;

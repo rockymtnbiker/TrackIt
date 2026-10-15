@@ -91,48 +91,116 @@ export function timesPerDay(
   return storedTimesPerDay(goal.timesPerDay);
 }
 
-/** Logged count for one entry. No row is 0. A null value is one log. */
-export function dayCount(entry: GoalEntry | null | undefined): number {
-  if (!entry) {
-    return 0;
-  }
-  if (entry.value == null) {
-    return 1;
-  }
-  return entry.value;
+function sameDay(entry: GoalEntry, goalId: string, date: string): boolean {
+  return entry.goalId === goalId && entry.entryDate.slice(0, 10) === date.slice(0, 10);
 }
 
-export function isDayComplete(
-  goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit' | 'targetAmount' | 'timesPerDay'>,
-  entry: GoalEntry | null | undefined,
-): boolean {
-  if (!entry) {
+/** Every log for one step on one calendar day. */
+export function dayEntries(entries: GoalEntry[], goalId: string, date: string): GoalEntry[] {
+  return entries.filter((entry) => sameDay(entry, goalId, date));
+}
+
+/** Session count. Each row is one session, including an existing null yes/no row. */
+export function dayCount(entries: GoalEntry[], goalId: string, date: string): number {
+  return dayEntries(entries, goalId, date).length;
+}
+
+/** Sum of amount-log values for one step on one day. Null values add nothing. */
+export function dayTotal(entries: GoalEntry[], goalId: string, date: string): number {
+  return dayEntries(entries, goalId, date).reduce(
+    (sum, entry) => sum + (entry.value ?? 0),
+    0,
+  );
+}
+
+function entrySortKey(entry: GoalEntry): string {
+  return `${entry.createdAt ?? ''}\u0000${entry.id}`;
+}
+
+/** Most recent log that day, by created_at. */
+export function latestDayEntry(
+  entries: GoalEntry[],
+  goalId: string,
+  date: string,
+): GoalEntry | null {
+  let latest: GoalEntry | null = null;
+  for (const entry of dayEntries(entries, goalId, date)) {
+    if (!latest || entrySortKey(entry) > entrySortKey(latest)) {
+      latest = entry;
+    }
+  }
+  return latest;
+}
+
+/**
+ * Daily yes/no is complete at times_per_day sessions.
+ * Other yes/no days are complete at one session.
+ * Amount days are complete when the day's values sum to more than zero.
+ */
+export function isDayComplete(goal: Goal, entries: GoalEntry[], date: string): boolean {
+  const count = dayCount(entries, goal.id, date);
+  if (count === 0) {
     return false;
   }
-  return dayCount(entry) >= timesPerDay(goal);
+  if (isTracked(goal)) {
+    return dayTotal(entries, goal.id, date) > 0;
+  }
+  if (isDaily(goal)) {
+    return count >= timesPerDay(goal);
+  }
+  return true;
 }
 
 export function dayProgress(
-  goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit' | 'targetAmount' | 'timesPerDay'>,
-  entry: GoalEntry | null | undefined,
+  goal: Goal,
+  entries: GoalEntry[],
+  date: string,
 ): { count: number; needed: number } {
-  return { count: dayCount(entry), needed: timesPerDay(goal) };
+  return {
+    count: dayCount(entries, goal.id, date),
+    needed: timesPerDay(goal),
+  };
 }
 
 export type DayFill = 'none' | 'partial' | 'complete';
 
-/** Complete, partial (some logs, not enough), or nothing logged. */
-export function dayFill(
-  goal: Pick<Goal, 'repeatPeriod' | 'plannedDays' | 'unit' | 'targetAmount' | 'timesPerDay'>,
-  entry: GoalEntry | null | undefined,
-): DayFill {
-  if (isDayComplete(goal, entry)) {
+/** Complete, partial (Daily more-than-once only), or nothing logged. */
+export function dayFill(goal: Goal, entries: GoalEntry[], date: string): DayFill {
+  if (isDayComplete(goal, entries, date)) {
     return 'complete';
   }
-  if (dayCount(entry) > 0) {
+  if (
+    !isTracked(goal) &&
+    isDaily(goal) &&
+    timesPerDay(goal) > 1 &&
+    dayCount(entries, goal.id, date) > 0
+  ) {
     return 'partial';
   }
   return 'none';
+}
+
+/** Weekly and monthly days with two or more sessions. Daily uses the dot fill instead. */
+export function daySessionMark(goal: Goal, entries: GoalEntry[], date: string): number | null {
+  if (isDaily(goal)) {
+    return null;
+  }
+  const count = dayCount(entries, goal.id, date);
+  return count >= 2 ? count : null;
+}
+
+export type YesNoLogAction = 'insert' | 'remove-day' | 'full-sheet' | 'again-sheet';
+
+/** What a tap on a yes/no step does for this day. Amount steps use the log sheet. */
+export function yesNoLogAction(goal: Goal, entries: GoalEntry[], date: string): YesNoLogAction {
+  const count = dayCount(entries, goal.id, date);
+  if (isDaily(goal) && timesPerDay(goal) <= 1) {
+    return count >= 1 ? 'remove-day' : 'insert';
+  }
+  if (isDaily(goal)) {
+    return count >= timesPerDay(goal) ? 'full-sheet' : 'insert';
+  }
+  return count >= 1 ? 'again-sheet' : 'insert';
 }
 
 /**
@@ -170,7 +238,8 @@ export function weeklyTarget(
 
 /**
  * This step's own entries in the period containing date.
- * Tracked steps sum values. Yes/no steps count complete days only.
+ * Tracked steps sum values. Daily yes/no counts complete days.
+ * Other yes/no steps count sessions (rows).
  */
 export function periodTotal(
   node: Goal,
@@ -190,7 +259,18 @@ export function periodTotal(
     return own.reduce((sum, entry) => sum + (entry.value ?? 0), 0);
   }
 
-  return own.filter((entry) => isDayComplete(node, entry)).length;
+  if (isDaily(node)) {
+    const dates = new Set(own.map((entry) => entry.entryDate.slice(0, 10)));
+    let complete = 0;
+    for (const day of dates) {
+      if (isDayComplete(node, entries, day)) {
+        complete += 1;
+      }
+    }
+    return complete;
+  }
+
+  return own.length;
 }
 
 /** False when the step has no target amount. */
@@ -285,16 +365,24 @@ export function weekTargetFor(
 }
 
 /**
- * Dates that count toward a streak. Tracked steps count a day only when the
- * entry value is greater than zero. Yes/no steps count complete days only.
+ * Dates that count toward a streak. A day is included once, and only when
+ * isDayComplete says so.
  */
 export function completionDates(node: Goal, entries: GoalEntry[]): string[] {
-  return entries
-    .filter((entry) => entry.goalId === node.id)
-    .filter((entry) =>
-      isTracked(node) ? (entry.value ?? 0) > 0 : isDayComplete(node, entry),
-    )
-    .map((entry) => entry.entryDate);
+  const dates = new Set<string>();
+  for (const entry of entries) {
+    if (entry.goalId !== node.id) {
+      continue;
+    }
+    const day = entry.entryDate.slice(0, 10);
+    if (dates.has(day)) {
+      continue;
+    }
+    if (isDayComplete(node, entries, day)) {
+      dates.add(day);
+    }
+  }
+  return [...dates];
 }
 
 export function buildChildrenMap(

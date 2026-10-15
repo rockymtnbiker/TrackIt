@@ -66,6 +66,7 @@ type EntryRow = {
   goal_id: string;
   entry_date: string;
   value: number | string | null;
+  created_at?: string | null;
 };
 
 const SHARE_COLUMNS = 'id, owner_id, viewer_id, goal_id, created_at';
@@ -131,6 +132,7 @@ function mapEntry(row: EntryRow): GoalEntry {
     goalId: row.goal_id,
     entryDate: row.entry_date.slice(0, 10),
     value: amountToNumber(row.value) ?? null,
+    createdAt: row.created_at ?? '',
   };
 }
 
@@ -373,7 +375,7 @@ export async function getGoalsSharedWithMe(partnerId: string): Promise<SharedGoa
 
   const { data: entryData, error: entryError } = await supabase
     .from(ENTRIES_TABLE)
-    .select('id, goal_id, entry_date, value')
+    .select('id, goal_id, entry_date, value, created_at')
     .eq('user_id', partnerId)
     .in(
       'goal_id',

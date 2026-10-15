@@ -3,11 +3,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -21,6 +19,7 @@ import GoalEditForm, { type GoalEditFormHandle } from '../components/GoalEditFor
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { KeyboardSafe } from '../components/KeyboardSafe';
+import { showActionSheet } from '../components/showActionSheet';
 import { PendingStatusCircle } from '../components/PendingStatusCircle';
 import {
   bigDealSummary,
@@ -33,25 +32,31 @@ import { periodTotalAsOf } from '../lib/asOfDate';
 import {
   createGoal,
   deleteEntry,
+  deleteEntryById,
   getAllGoals,
   getEntries,
+  insertEntry,
   setGoalStatus,
-  upsertEntry,
   type UpsertedEntry,
 } from '../lib/goalTreeApi';
 import {
   buildChildrenMap,
+  dayCount,
   dayFill,
   dayProgress,
+  daySessionMark,
+  dayTotal,
   goalStartDate,
   isDaily,
   isDayComplete,
   isRepeating,
   isTracked,
+  latestDayEntry,
   rollupTotal,
   timesPerDay,
   weekTargetFor,
   weeklyTarget,
+  yesNoLogAction,
 } from '../lib/goalTree';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { Goal, GoalEntry, GoalStatus } from '../types/goal';
@@ -298,33 +303,6 @@ export default function GoalScreen({ navigation, route }: Props) {
     requestAnimationFrame(() => addRef.current?.focus());
   };
 
-  const replaceEntries = (
-    goal: string,
-    date: string,
-    value: number | null | undefined,
-  ) => {
-    setEntries((current) => {
-      const index = current.findIndex(
-        (entry) => entry.goalId === goal && entry.entryDate.slice(0, 10) === date,
-      );
-      if (value === undefined) {
-        return index >= 0 ? current.filter((_, item) => item !== index) : current;
-      }
-      if (index >= 0) {
-        const next = current.slice();
-        const existing = current[index];
-        if (existing) {
-          next[index] = { ...existing, value };
-        }
-        return next;
-      }
-      return [
-        ...current,
-        { id: `local-${goal}-${date}`, goalId: goal, entryDate: date, value },
-      ];
-    });
-  };
-
   const applySavedGoals = (goals: Goal[]) => {
     if (goals.length === 0) {
       return;
@@ -334,52 +312,112 @@ export default function GoalScreen({ navigation, route }: Props) {
     setNodes((current) => current.map((item) => byId.get(item.id) ?? item));
   };
 
-  const applyUpsert = (saved: UpsertedEntry) => {
-    applySavedGoals(saved.goals);
-    setEntries((current) =>
-      current.map((entry) =>
-        entry.goalId === saved.entry.goalId &&
-        entry.entryDate.slice(0, 10) === saved.entry.entryDate.slice(0, 10)
-          ? saved.entry
-          : entry,
-      ),
-    );
-  };
-
-  const toggleToday = (tracked: boolean) => {
+  const commitEntries = (
+    nextEntries: GoalEntry[],
+    persist: Promise<UpsertedEntry | void>,
+    localId?: string,
+  ) => {
     if (!node || entryBusy.current) {
       return;
     }
-    const logged = entries.some(
-      (entry) =>
-        entry.goalId === node.id && entry.entryDate.slice(0, 10) === today,
-    );
-    entryBusy.current = true;
     const previous = entries;
-    if (logged) {
-      replaceEntries(node.id, today, undefined);
-      void deleteEntry(node.id, today)
-        .catch((error) => {
-          console.warn('Failed to update today', error);
-          setEntries(previous);
-        })
-        .finally(() => {
-          entryBusy.current = false;
-        });
-      return;
-    }
-    if (!tracked) {
-      replaceEntries(node.id, today, null);
-    }
-    void upsertEntry(node.id, today, null)
-      .then(applyUpsert)
+    entryBusy.current = true;
+    setEntries(nextEntries);
+    void persist
+      .then((saved) => {
+        if (!saved) {
+          return;
+        }
+        applySavedGoals(saved.goals);
+        setEntries((current) =>
+          current.map((entry) => (entry.id === localId ? saved.entry : entry)),
+        );
+      })
       .catch((error) => {
-        console.warn('Failed to update today', error);
+        console.warn('Failed to update log', error);
         setEntries(previous);
+        Alert.alert(
+          'Could not log',
+          error instanceof Error ? error.message : 'Could not save this log.',
+        );
       })
       .finally(() => {
         entryBusy.current = false;
       });
+  };
+
+  const insertLog = (value: number | null) => {
+    if (!node) {
+      return;
+    }
+    const local: GoalEntry = {
+      id: `local-${node.id}-${today}-${Date.now()}`,
+      goalId: node.id,
+      entryDate: today,
+      value,
+      createdAt: new Date().toISOString(),
+    };
+    commitEntries([...entries, local], insertEntry(node.id, today, value), local.id);
+  };
+
+  const undoLastLog = () => {
+    if (!node) {
+      return;
+    }
+    const latest = latestDayEntry(entries, node.id, today);
+    if (!latest) {
+      return;
+    }
+    const next = entries.filter((entry) => entry.id !== latest.id);
+    const persist = latest.id.startsWith('local-')
+      ? Promise.resolve()
+      : deleteEntryById(latest.id).then(() => undefined);
+    commitEntries(next, persist);
+  };
+
+  const clearDayLogs = () => {
+    if (!node) {
+      return;
+    }
+    commitEntries(
+      entries.filter(
+        (entry) =>
+          !(entry.goalId === node.id && entry.entryDate.slice(0, 10) === today),
+      ),
+      deleteEntry(node.id, today).then(() => undefined),
+    );
+  };
+
+  const logYesNo = () => {
+    if (!node) {
+      return;
+    }
+    const action = yesNoLogAction(node, entries, today);
+    if (action === 'insert') {
+      insertLog(null);
+      return;
+    }
+    if (action === 'remove-day') {
+      clearDayLogs();
+      return;
+    }
+    if (action === 'full-sheet') {
+      showActionSheet('Today', ['Undo one', 'Clear today'], (index) => {
+        if (index === 0) {
+          undoLastLog();
+        } else if (index === 1) {
+          clearDayLogs();
+        }
+      });
+      return;
+    }
+    showActionSheet('Today', ['Log another', 'Undo last'], (index) => {
+      if (index === 0) {
+        insertLog(null);
+      } else if (index === 1) {
+        undoLastLog();
+      }
+    });
   };
 
   const openLog = () => {
@@ -394,74 +432,6 @@ export default function GoalScreen({ navigation, route }: Props) {
     setLogError(null);
   };
 
-  const logDose = () => {
-    if (!node || entryBusy.current) {
-      return;
-    }
-    const entry = entries.find(
-      (item) =>
-        item.goalId === node.id && item.entryDate.slice(0, 10) === today,
-    );
-    const progress = dayProgress(node, entry);
-
-    const applyCount = (next: number) => {
-      const previous = entries;
-      entryBusy.current = true;
-      if (next <= 0) {
-        replaceEntries(node.id, today, undefined);
-        void deleteEntry(node.id, today)
-          .catch((error) => {
-            console.warn('Failed to update today', error);
-            setEntries(previous);
-          })
-          .finally(() => {
-            entryBusy.current = false;
-          });
-        return;
-      }
-      replaceEntries(node.id, today, next);
-      void upsertEntry(node.id, today, next)
-        .then(applyUpsert)
-        .catch((error) => {
-          console.warn('Failed to update today', error);
-          setEntries(previous);
-        })
-        .finally(() => {
-          entryBusy.current = false;
-        });
-    };
-
-    if (progress.count >= progress.needed) {
-      const undo = () => applyCount(progress.count - 1);
-      const clear = () => applyCount(0);
-      if (Platform.OS === 'ios') {
-        ActionSheetIOS.showActionSheetWithOptions(
-          {
-            options: ['Undo one', 'Clear today', 'Cancel'],
-            cancelButtonIndex: 2,
-            destructiveButtonIndex: 1,
-          },
-          (buttonIndex) => {
-            if (buttonIndex === 0) {
-              undo();
-            } else if (buttonIndex === 1) {
-              clear();
-            }
-          },
-        );
-        return;
-      }
-      Alert.alert('Today', undefined, [
-        { text: 'Undo one', onPress: undo },
-        { text: 'Clear today', style: 'destructive', onPress: clear },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-      return;
-    }
-
-    applyCount(progress.count + 1);
-  };
-
   const saveLog = () => {
     if (!node || entryBusy.current) {
       return;
@@ -472,24 +442,12 @@ export default function GoalScreen({ navigation, route }: Props) {
       setLogError('Enter a number greater than zero.');
       return;
     }
-    const existing = entries.find(
-      (entry) =>
-        entry.goalId === node.id && entry.entryDate.slice(0, 10) === today,
-    );
-    const nextValue = (existing?.value ?? 0) + amount;
-    const previous = entries;
-    entryBusy.current = true;
-    replaceEntries(node.id, today, nextValue);
     closeLog();
-    void upsertEntry(node.id, today, nextValue)
-      .then(applyUpsert)
-      .catch((error) => {
-        console.warn('Failed to log amount', error);
-        setEntries(previous);
-      })
-      .finally(() => {
-        entryBusy.current = false;
-      });
+    insertLog(amount);
+  };
+
+  const undoAmount = () => {
+    undoLastLog();
   };
 
   const completeOneTime = () => {
@@ -587,14 +545,10 @@ export default function GoalScreen({ navigation, route }: Props) {
       : null;
   const streaks = goalStreaks(node, entries, today, weekStartsOn);
   const whyText = node.why?.trim() ?? '';
-  const todayEntry = entries.find(
-    (entry) => entry.goalId === node.id && entry.entryDate.slice(0, 10) === today,
-  );
-  const loggedToday = isTracked(node)
-    ? todayEntry != null
-    : isDayComplete(node, todayEntry);
+  const loggedToday = isDayComplete(node, entries, today);
   const doses = timesPerDay(node);
-  const doseProgress = dayProgress(node, todayEntry);
+  const doseProgress = dayProgress(node, entries, today);
+  const sessionsToday = dayCount(entries, node.id, today);
   const needsSetup =
     !isTracked(node) && !isRepeating(node) && children.length === 0;
   const addField = (
@@ -745,27 +699,27 @@ export default function GoalScreen({ navigation, route }: Props) {
             analysis={analysis}
             loggedToday={loggedToday}
             doseLabel={
-              doses > 1
-                ? doseProgress.count >= doseProgress.needed
-                  ? '✓ Done today · tap to undo'
-                  : `Log dose · ${doseProgress.count} of ${doseProgress.needed} today`
-                : null
+              isTracked(node)
+                ? loggedToday
+                  ? '✓ Logged today'
+                  : 'Log today'
+                : doses > 1
+                  ? doseProgress.count >= doseProgress.needed
+                    ? '✓ Done today · tap to undo'
+                    : `Log dose · ${doseProgress.count} of ${doseProgress.needed} today`
+                  : sessionsToday >= 1
+                    ? isDaily(node)
+                      ? '✓ Logged today · tap to undo'
+                      : '✓ Logged today'
+                    : null
             }
             canLog={!readOnly}
             onPress={() => {
               if (isTracked(node)) {
-                if (loggedToday) {
-                  toggleToday(true);
-                } else {
-                  openLog();
-                }
+                openLog();
                 return;
               }
-              if (doses > 1) {
-                logDose();
-                return;
-              }
-              toggleToday(false);
+              logYesNo();
             }}
           />
         ) : null}
@@ -897,7 +851,7 @@ export default function GoalScreen({ navigation, route }: Props) {
             <Pressable style={styles.logCard} onPress={() => {}}>
               <Text style={styles.logTitle}>{node.title || 'Log amount'}</Text>
               <Text style={styles.logDate}>
-                Today: {formatQty(dayValue(entries, node.id, today))} {node.unit ?? ''}
+                Today: {formatQty(dayTotal(entries, node.id, today))} {node.unit ?? ''}
               </Text>
               <View style={styles.logInputRow}>
                 <TextInput
@@ -922,6 +876,21 @@ export default function GoalScreen({ navigation, route }: Props) {
                 </Pressable>
               </View>
               {logError ? <Text style={styles.logError}>{logError}</Text> : null}
+              <Pressable
+                onPress={undoAmount}
+                style={({ pressed }) => [styles.logClear, pressed && styles.pressed]}
+              >
+                <Text style={styles.logClearText}>Undo last</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  closeLog();
+                  clearDayLogs();
+                }}
+                style={({ pressed }) => [styles.logClear, pressed && styles.pressed]}
+              >
+                <Text style={styles.logClearText}>Clear</Text>
+              </Pressable>
             </Pressable>
           </Pressable>
         </KeyboardSafe>
@@ -933,13 +902,6 @@ export default function GoalScreen({ navigation, route }: Props) {
 function formatQty(value: number): string {
   const rounded = Math.round(value * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
-}
-
-function dayValue(entries: GoalEntry[], goalId: string, date: string): number {
-  const entry = entries.find(
-    (item) => item.goalId === goalId && item.entryDate.slice(0, 10) === date,
-  );
-  return entry?.value ?? 0;
 }
 
 function segmentArcPath(index: number, count: number): string {
@@ -1112,13 +1074,10 @@ function WeekStrip({
   const available = new Set(
     weekTargetFor(node, today, weekStartsOn).availableDays.map(dateKey),
   );
-  const byDate = new Map<string, GoalEntry>();
-  for (const entry of entries) {
+  const visibleEntries = entries.filter((entry) => {
     const date = entry.entryDate.slice(0, 10);
-    if (entry.goalId === node.id && date <= today && date >= start) {
-      byDate.set(date, entry);
-    }
-  }
+    return entry.goalId === node.id && date <= today && date >= start;
+  });
 
   return (
     <View style={styles.weekStrip}>
@@ -1140,21 +1099,27 @@ function WeekStrip({
         }
         const isToday = day === today;
         const after = day > today;
-        const fill = dayFill(node, byDate.get(day));
+        const fill = dayFill(node, visibleEntries, day);
+        const sessions = after ? null : daySessionMark(node, visibleEntries, day);
         return (
           <View key={day} style={styles.dotSlot}>
-            {isToday ? <View style={styles.dotRing} /> : null}
-            {after ? (
-              <View style={[styles.dot, styles.dotHollow]} />
-            ) : fill === 'complete' ? (
-              <View style={[styles.dot, styles.dotDone]} />
-            ) : fill === 'partial' ? (
-              <View style={[styles.dot, styles.dotPartial]}>
-                <View style={styles.dotPartialFill} />
-              </View>
-            ) : (
-              <View style={[styles.dot, styles.dotMissed]} />
-            )}
+            <View style={styles.dotBox}>
+              {isToday ? <View style={styles.dotRing} /> : null}
+              {after ? (
+                <View style={[styles.dot, styles.dotHollow]} />
+              ) : fill === 'complete' ? (
+                <View style={[styles.dot, styles.dotDone]} />
+              ) : fill === 'partial' ? (
+                <View style={[styles.dot, styles.dotPartial]}>
+                  <View style={styles.dotPartialFill} />
+                </View>
+              ) : (
+                <View style={[styles.dot, styles.dotMissed]} />
+              )}
+            </View>
+            {sessions != null ? (
+              <Text style={styles.dotSessions}>{`×${sessions}`}</Text>
+            ) : null}
           </View>
         );
       })}
@@ -1551,9 +1516,19 @@ const styles = StyleSheet.create({
   },
   dotSlot: {
     width: 36,
-    height: 36,
+    alignItems: 'center',
+  },
+  dotBox: {
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dotSessions: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#248A3D',
   },
   dot: {
     width: 28,
@@ -1711,5 +1686,15 @@ const styles = StyleSheet.create({
   logError: {
     fontSize: 13,
     color: '#c62828',
+  },
+  logClear: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logClearText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#007aff',
   },
 });

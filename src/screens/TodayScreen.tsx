@@ -3,11 +3,9 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   FlatList,
-  Platform,
   Modal,
   Pressable,
   ScrollView,
@@ -22,13 +20,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { KeyboardSafe } from '../components/KeyboardSafe';
+import { showActionSheet } from '../components/showActionSheet';
 import { useSettings } from '../context/SettingsContext';
 import {
   deleteEntry,
+  deleteEntryById,
   getAllGoals,
   getEntries,
+  insertEntry,
   setGoalStatus,
-  upsertEntry,
   type UpsertedEntry,
 } from '../lib/goalTreeApi';
 import {
@@ -42,16 +42,21 @@ import {
 import { goalStartDate } from '../lib/metrics';
 import {
   buildChildrenMap,
+  isDaily,
   isLeaf,
   completionDates,
   dayFill,
   dayProgress,
+  daySessionMark,
+  dayTotal,
   isDayComplete,
   isRepeating,
   isTracked,
+  latestDayEntry,
   rollupTotal,
   timesPerDay,
   weekTargetFor,
+  yesNoLogAction,
 } from '../lib/goalTree';
 import type { WeekStart } from '../lib/settingsApi';
 import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
@@ -126,34 +131,14 @@ function formatAmount(value: number): string {
   return String(Math.round(value * 100) / 100);
 }
 
-function dayValue(entries: GoalEntry[], goalId: string, date: string): number {
-  const entry = entries.find(
-    (item) => item.goalId === goalId && item.entryDate === date,
-  );
-  return entry?.value ?? 0;
-}
-
-function withUpsertedEntry(
-  entries: GoalEntry[],
-  goalId: string,
-  date: string,
-  value: number | null,
-): GoalEntry[] {
-  const index = entries.findIndex(
-    (entry) => entry.goalId === goalId && entry.entryDate === date,
-  );
-  if (index >= 0) {
-    const next = entries.slice();
-    const current = entries[index];
-    if (current) {
-      next[index] = { ...current, value };
-    }
-    return next;
-  }
-  return [
-    ...entries,
-    { id: `local-${goalId}-${date}`, goalId, entryDate: date, value },
-  ];
+function localEntry(goalId: string, date: string, value: number | null): GoalEntry {
+  return {
+    id: `local-${goalId}-${date}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    goalId,
+    entryDate: date.slice(0, 10),
+    value,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 function withoutEntry(
@@ -281,15 +266,12 @@ function buildStepControl(
   }
 
   if (timesPerDay(step) > 1) {
-    const entry = entries.find(
-      (item) => item.goalId === step.id && item.entryDate.slice(0, 10) === asOf,
-    );
-    const progress = dayProgress(step, entry);
+    const progress = dayProgress(step, entries, asOf);
     return {
       type: 'segmented',
       total: progress.needed,
       filled: Math.min(progress.needed, progress.count),
-      loggedOnDay: isDayComplete(step, entry),
+      loggedOnDay: isDayComplete(step, entries, asOf),
       action: 'toggle',
     };
   }
@@ -365,10 +347,7 @@ function detailSubtitle(
   }
 
   if (row && timesPerDay(step) > 1) {
-    const entry = entries.find(
-      (item) => item.goalId === step.id && item.entryDate.slice(0, 10) === asOf,
-    );
-    const progress = dayProgress(step, entry);
+    const progress = dayProgress(step, entries, asOf);
     return {
       text:
         asOf === todayDateString()
@@ -1045,6 +1024,9 @@ function controlLabel(
   if (timesPerDay(step) > 1 && control.action === 'toggle') {
     return loggedOnDay ? 'Done today. Tap to undo' : 'Log a dose';
   }
+  if (control.action === 'toggle' && !isDaily(step) && loggedOnDay) {
+    return 'Logged. Tap for options';
+  }
   if (control.action === 'log') {
     return 'Log an amount';
   }
@@ -1078,15 +1060,8 @@ function WeekDots({
   const available = new Set(
     weekTargetFor(goal, asOf, weekStartsOn).availableDays.map(dateKey),
   );
-  const byDate = new Map<string, GoalEntry>();
-  for (const entry of entries) {
-    const date = entry.entryDate.slice(0, 10);
-    if (entry.goalId === goal.id && date <= asOf && date >= start) {
-      byDate.set(date, entry);
-    }
-  }
   const doneNames = days
-    .filter((day) => dayFill(goal, byDate.get(day)) === 'complete')
+    .filter((day) => day <= asOf && day >= start && dayFill(goal, entries, day) === 'complete')
     .map((day) => labels[days.indexOf(day)] ?? '');
   const label =
     doneNames.length > 0 ? `Done ${doneNames.join(', ')}` : 'No days done';
@@ -1116,21 +1091,27 @@ function WeekDots({
         }
         const selected = day === asOf;
         const after = day > asOf;
-        const fill = dayFill(goal, byDate.get(day));
+        const fill = dayFill(goal, entries, day);
+        const sessions = after ? null : daySessionMark(goal, entries, day);
         return (
           <View key={day} style={styles.weekDotSlot}>
-            {selected ? <View style={styles.weekDotRing} /> : null}
-            {after ? (
-              <View style={[styles.weekDot, styles.weekDotHollow]} />
-            ) : fill === 'complete' ? (
-              <View style={[styles.weekDot, styles.weekDotDone]} />
-            ) : fill === 'partial' ? (
-              <View style={[styles.weekDot, styles.weekDotPartial]}>
-                <View style={styles.weekDotPartialFill} />
-              </View>
-            ) : (
-              <View style={[styles.weekDot, styles.weekDotMissed]} />
-            )}
+            <View style={styles.weekDotBox}>
+              {selected ? <View style={styles.weekDotRing} /> : null}
+              {after ? (
+                <View style={[styles.weekDot, styles.weekDotHollow]} />
+              ) : fill === 'complete' ? (
+                <View style={[styles.weekDot, styles.weekDotDone]} />
+              ) : fill === 'partial' ? (
+                <View style={[styles.weekDot, styles.weekDotPartial]}>
+                  <View style={styles.weekDotPartialFill} />
+                </View>
+              ) : (
+                <View style={[styles.weekDot, styles.weekDotMissed]} />
+              )}
+            </View>
+            {sessions != null ? (
+              <Text style={styles.weekDotSessions}>{`×${sessions}`}</Text>
+            ) : null}
           </View>
         );
       })}
@@ -1473,13 +1454,7 @@ export default function TodayScreen() {
           id: node.id,
           title: node.title,
           tracked,
-          isComplete: isDayComplete(
-            node,
-            entries.find(
-              (entry) =>
-                entry.goalId === node.id && entry.entryDate.slice(0, 10) === selectedDate,
-            ),
-          ),
+          isComplete: isDayComplete(node, entries, selectedDate),
           isInteractive: !future,
           met: isPeriodTargetMetAsOf(node, entries, selectedDate, weekStartsOn),
           streak: calculateStreak(
@@ -1562,115 +1537,6 @@ export default function TodayScreen() {
     setNodes((current) => current.map((item) => byId.get(item.id) ?? item));
   };
 
-  const handleToggle = (item: RepeatingRow) => {
-    if (!item.isInteractive || item.tracked) {
-      return;
-    }
-
-    const toggleKey = `${item.id}:${selectedDate}`;
-    if (pendingTogglesRef.current.has(toggleKey)) {
-      return;
-    }
-
-    const previous = entriesRef.current;
-    const wasComplete = previous.some(
-      (entry) => entry.goalId === item.id && entry.entryDate === selectedDate,
-    );
-    setEntries(
-      wasComplete
-        ? withoutEntry(previous, item.id, selectedDate)
-        : withUpsertedEntry(previous, item.id, selectedDate, null),
-    );
-
-    pendingTogglesRef.current.add(toggleKey);
-    const persist = wasComplete
-      ? deleteEntry(item.id, selectedDate).then(() => undefined)
-      : upsertEntry(item.id, selectedDate, null).then((saved) => {
-          applySavedGoals(saved.goals);
-          return saved.entry;
-        });
-
-    void persist
-      .then((saved) => {
-        if (!saved) {
-          return;
-        }
-        setEntries((current) =>
-          current.map((entry) =>
-            entry.goalId === saved.goalId && entry.entryDate === saved.entryDate
-              ? saved
-              : entry,
-          ),
-        );
-      })
-      .catch((error) => {
-        console.warn('Failed to toggle habit completion', error);
-        setEntries(previous);
-      })
-      .finally(() => {
-        pendingTogglesRef.current.delete(toggleKey);
-      });
-  };
-
-  const handleDose = (step: Goal) => {
-    if (isFutureDate(selectedDate, today)) {
-      return;
-    }
-    const current = entriesRef.current.find(
-      (entry) =>
-        entry.goalId === step.id && entry.entryDate.slice(0, 10) === selectedDate,
-    );
-    const progress = dayProgress(step, current);
-
-    const applyCount = (next: number) => {
-      if (next <= 0) {
-        applyEntryChange(
-          step.id,
-          selectedDate,
-          withoutEntry(entriesRef.current, step.id, selectedDate),
-          deleteEntry(step.id, selectedDate).then(() => undefined),
-        );
-        return;
-      }
-      applyEntryChange(
-        step.id,
-        selectedDate,
-        withUpsertedEntry(entriesRef.current, step.id, selectedDate, next),
-        upsertEntry(step.id, selectedDate, next),
-      );
-    };
-
-    if (progress.count >= progress.needed) {
-      const undo = () => applyCount(progress.count - 1);
-      const clear = () => applyCount(0);
-      if (Platform.OS === 'ios') {
-        ActionSheetIOS.showActionSheetWithOptions(
-          {
-            options: ['Undo one', 'Clear today', 'Cancel'],
-            cancelButtonIndex: 2,
-            destructiveButtonIndex: 1,
-          },
-          (buttonIndex) => {
-            if (buttonIndex === 0) {
-              undo();
-            } else if (buttonIndex === 1) {
-              clear();
-            }
-          },
-        );
-        return;
-      }
-      Alert.alert('Today', undefined, [
-        { text: 'Undo one', onPress: undo },
-        { text: 'Clear today', style: 'destructive', onPress: clear },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-      return;
-    }
-
-    applyCount(progress.count + 1);
-  };
-
   const openLog = (goalId: string) => {
     if (isFutureDate(selectedDate, today)) {
       return;
@@ -1691,6 +1557,7 @@ export default function TodayScreen() {
     date: string,
     nextEntries: GoalEntry[],
     persist: Promise<UpsertedEntry | void>,
+    localId?: string,
   ) => {
     const previous = entriesRef.current;
     const toggleKey = `${goalId}:${date}`;
@@ -1698,7 +1565,6 @@ export default function TodayScreen() {
       return;
     }
     setEntries(nextEntries);
-    closeLog();
     pendingTogglesRef.current.add(toggleKey);
     void persist
       .then((saved) => {
@@ -1707,21 +1573,84 @@ export default function TodayScreen() {
         }
         applySavedGoals(saved.goals);
         setEntries((current) =>
-          current.map((entry) =>
-            entry.goalId === saved.entry.goalId &&
-            entry.entryDate === saved.entry.entryDate
-              ? saved.entry
-              : entry,
-          ),
+          current.map((entry) => (entry.id === localId ? saved.entry : entry)),
         );
       })
       .catch((error) => {
         console.warn('Failed to update log', error);
         setEntries(previous);
+        Alert.alert(
+          'Could not log',
+          error instanceof Error ? error.message : 'Could not save this log.',
+        );
       })
       .finally(() => {
         pendingTogglesRef.current.delete(toggleKey);
       });
+  };
+
+  const insertLog = (goalId: string, date: string, value: number | null) => {
+    const local = localEntry(goalId, date, value);
+    applyEntryChange(
+      goalId,
+      date,
+      [...entriesRef.current, local],
+      insertEntry(goalId, date, value),
+      local.id,
+    );
+  };
+
+  const undoLastLog = (goalId: string, date: string) => {
+    const latest = latestDayEntry(entriesRef.current, goalId, date);
+    if (!latest) {
+      return;
+    }
+    const next = entriesRef.current.filter((entry) => entry.id !== latest.id);
+    const persist = latest.id.startsWith('local-')
+      ? Promise.resolve()
+      : deleteEntryById(latest.id).then(() => undefined);
+    applyEntryChange(goalId, date, next, persist);
+  };
+
+  const clearDayLogs = (goalId: string, date: string) => {
+    applyEntryChange(
+      goalId,
+      date,
+      withoutEntry(entriesRef.current, goalId, date),
+      deleteEntry(goalId, date).then(() => undefined),
+    );
+  };
+
+  const handleYesNo = (step: Goal) => {
+    if (isFutureDate(selectedDate, today) || isTracked(step)) {
+      return;
+    }
+    const action = yesNoLogAction(step, entriesRef.current, selectedDate);
+    if (action === 'insert') {
+      insertLog(step.id, selectedDate, null);
+      return;
+    }
+    if (action === 'remove-day') {
+      clearDayLogs(step.id, selectedDate);
+      return;
+    }
+    if (action === 'full-sheet') {
+      showActionSheet('Today', ['Undo one', 'Clear today'], (index) => {
+        if (index === 0) {
+          undoLastLog(step.id, selectedDate);
+        } else if (index === 1) {
+          clearDayLogs(step.id, selectedDate);
+        }
+      });
+      return;
+    }
+    showActionSheet('Today', ['Log another', 'Undo last'], (index) => {
+      if (index === 0) {
+        insertLog(step.id, selectedDate, null);
+      } else if (index === 1) {
+        undoLastLog(step.id, selectedDate);
+      }
+    });
   };
 
   const handleAddAmount = () => {
@@ -1734,13 +1663,16 @@ export default function TodayScreen() {
       setLogError('Enter a number greater than zero.');
       return;
     }
-    const nextValue = dayValue(entriesRef.current, logStepId, selectedDate) + amount;
-    applyEntryChange(
-      logStepId,
-      selectedDate,
-      withUpsertedEntry(entriesRef.current, logStepId, selectedDate, nextValue),
-      upsertEntry(logStepId, selectedDate, nextValue),
-    );
+    const goalId = logStepId;
+    closeLog();
+    insertLog(goalId, selectedDate, amount);
+  };
+
+  const handleUndoLastAmount = () => {
+    if (!logStepId) {
+      return;
+    }
+    undoLastLog(logStepId, selectedDate);
   };
 
   const handleClearDay = () => {
@@ -1757,12 +1689,8 @@ export default function TodayScreen() {
           text: 'Clear',
           style: 'destructive',
           onPress: () => {
-            applyEntryChange(
-              goalId,
-              selectedDate,
-              withoutEntry(entriesRef.current, goalId, selectedDate),
-              deleteEntry(goalId, selectedDate),
-            );
+            closeLog();
+            clearDayLogs(goalId, selectedDate);
           },
         },
       ],
@@ -1953,11 +1881,7 @@ export default function TodayScreen() {
                     return;
                   }
                   if (control.action === 'toggle') {
-                    if (timesPerDay(step) > 1) {
-                      handleDose(step);
-                    } else {
-                      handleToggle(row);
-                    }
+                    handleYesNo(step);
                   }
                 };
 
@@ -2023,9 +1947,7 @@ export default function TodayScreen() {
                 {getChecklistHeading(selectedDate, today)}
                 {': '}
                 {formatAmount(
-                  logStep
-                    ? dayValue(entries, logStep.id, selectedDate)
-                    : 0,
+                  logStep ? dayTotal(entries, logStep.id, selectedDate) : 0,
                 )}{' '}
                 {logStep?.unit ?? ''}
               </Text>
@@ -2057,6 +1979,15 @@ export default function TodayScreen() {
               {logError ? (
                 <Text style={styles.logError}>{logError}</Text>
               ) : null}
+              <Pressable
+                onPress={handleUndoLastAmount}
+                style={({ pressed }) => [
+                  styles.logClearButton,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.logClearText}>Undo last</Text>
+              </Pressable>
               <Pressable
                 onPress={handleClearDay}
                 style={({ pressed }) => [
@@ -2260,10 +2191,21 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   weekDotSlot: {
+    width: 16,
+    alignItems: 'center',
+  },
+  weekDotBox: {
     width: 8,
     height: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  weekDotSessions: {
+    marginTop: 1,
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: '600',
+    color: '#248A3D',
   },
   weekDot: {
     width: 8,

@@ -30,4 +30,5 @@ export type GoalEntry = {
   goalId: string;
   entryDate: string;
   value: number | null;
+  createdAt: string;
 };

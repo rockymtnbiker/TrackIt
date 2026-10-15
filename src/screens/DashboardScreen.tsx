@@ -25,6 +25,7 @@ import {
 import {
   buildChildrenMap,
   dayFill,
+  daySessionMark,
   goalStartDate,
   isLeaf,
   isRepeating,
@@ -357,14 +358,13 @@ function planOrder(nodes: Goal[], childrenMap: Map<string | null, Goal[]>): Goal
 }
 
 function mergeEntries(groups: GoalEntry[][]): GoalEntry[] {
-  const byKey = new Map<string, GoalEntry>();
+  const byId = new Map<string, GoalEntry>();
   for (const group of groups) {
     for (const entry of group) {
-      const date = entry.entryDate.slice(0, 10);
-      byKey.set(`${entry.goalId}:${date}`, { ...entry, entryDate: date });
+      byId.set(entry.id, { ...entry, entryDate: entry.entryDate.slice(0, 10) });
     }
   }
-  return [...byKey.values()];
+  return [...byId.values()];
 }
 
 type WinRow = {
@@ -488,14 +488,6 @@ function WeekDots({
   const available = new Set(
     weekTargetFor(goal, asOf, weekStartsOn).availableDays.map(dateKey),
   );
-  const byDate = new Map<string, GoalEntry>();
-  for (const entry of entries) {
-    const date = entry.entryDate.slice(0, 10);
-    if (entry.goalId === goal.id && date <= asOf && date >= start) {
-      byDate.set(date, entry);
-    }
-  }
-
   return (
     <View style={styles.weekDots} pointerEvents="none">
       {days.map((day) => {
@@ -516,21 +508,27 @@ function WeekDots({
         }
         const selected = day === asOf;
         const after = day > asOf;
-        const fill = dayFill(goal, byDate.get(day));
+        const fill = dayFill(goal, entries, day);
+        const sessions = after || day < start ? null : daySessionMark(goal, entries, day);
         return (
           <View key={day} style={styles.weekDotSlot}>
-            {selected ? <View style={styles.weekDotRing} /> : null}
-            {after ? (
-              <View style={[styles.weekDot, styles.weekDotHollow]} />
-            ) : fill === 'complete' ? (
-              <View style={[styles.weekDot, styles.weekDotDone]} />
-            ) : fill === 'partial' ? (
-              <View style={[styles.weekDot, styles.weekDotPartial]}>
-                <View style={styles.weekDotPartialFill} />
-              </View>
-            ) : (
-              <View style={[styles.weekDot, styles.weekDotMissed]} />
-            )}
+            <View style={styles.weekDotBox}>
+              {selected ? <View style={styles.weekDotRing} /> : null}
+              {after ? (
+                <View style={[styles.weekDot, styles.weekDotHollow]} />
+              ) : fill === 'complete' ? (
+                <View style={[styles.weekDot, styles.weekDotDone]} />
+              ) : fill === 'partial' ? (
+                <View style={[styles.weekDot, styles.weekDotPartial]}>
+                  <View style={styles.weekDotPartialFill} />
+                </View>
+              ) : (
+                <View style={[styles.weekDot, styles.weekDotMissed]} />
+              )}
+            </View>
+            {sessions != null ? (
+              <Text style={styles.weekDotSessions}>{`×${sessions}`}</Text>
+            ) : null}
           </View>
         );
       })}
@@ -1484,10 +1482,21 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   weekDotSlot: {
+    width: 16,
+    alignItems: 'center',
+  },
+  weekDotBox: {
     width: 8,
     height: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  weekDotSessions: {
+    marginTop: 1,
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: '600',
+    color: '#248A3D',
   },
   weekDot: {
     width: 8,

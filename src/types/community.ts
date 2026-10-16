@@ -12,9 +12,20 @@ export type Connection = {
 };
 
 export type GoalShare = {
-  id: string;
   ownerId: string;
   viewerId: string;
   goalId: string;
   createdAt: string;
+};
+
+export type GoalComment = {
+  id: string;
+  goalId: string;
+  ownerId: string;
+  partnerId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  createdAt: string;
+  mine: boolean;
 };

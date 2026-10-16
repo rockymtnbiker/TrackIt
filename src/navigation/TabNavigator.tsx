@@ -4,11 +4,13 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CommunityProvider, useCommunity } from '../context/CommunityContext';
+import CommentThreadScreen from '../screens/CommentThreadScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import GoalScreen from '../screens/GoalScreen';
 import TodayScreen from '../screens/TodayScreen';
 import CommunityStackNavigator from './CommunityStackNavigator';
 import GoalsStackNavigator, {
+  type CommentThreadParams,
   type GoalRouteParams,
   type TodayStackParamList,
 } from './GoalsStackNavigator';
@@ -26,6 +28,7 @@ export type DashboardStackParamList = {
   DashboardMain: undefined;
   Goal: GoalRouteParams;
   StepDetail: { goalId: string };
+  Comments: CommentThreadParams;
 };
 
 const Tab = createMaterialTopTabNavigator<RootTabParamList>();
@@ -45,6 +48,11 @@ function TodayStackNavigator() {
         name="Goal"
         component={GoalScreen}
         options={{ title: '', headerTitleAlign: 'center' }}
+      />
+      <TodayStack.Screen
+        name="Comments"
+        component={CommentThreadScreen}
+        options={{ title: 'Comments', headerTitleAlign: 'center' }}
       />
     </TodayStack.Navigator>
   );
@@ -66,6 +74,11 @@ function DashboardStackNavigator() {
         name="Goal"
         component={GoalScreen}
         options={{ title: '', headerTitleAlign: 'center' }}
+      />
+      <DashboardStack.Screen
+        name="Comments"
+        component={CommentThreadScreen}
+        options={{ title: 'Comments', headerTitleAlign: 'center' }}
       />
     </DashboardStack.Navigator>
   );

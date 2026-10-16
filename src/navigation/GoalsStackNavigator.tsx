@@ -1,4 +1,5 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import CommentThreadScreen from '../screens/CommentThreadScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalsListScreen from '../screens/GoalsListScreen';
@@ -11,18 +12,28 @@ export type GoalRouteParams = {
   sharedByName?: string;
 };
 
+export type CommentThreadParams = {
+  goalId: string;
+  ownerId: string;
+  partnerId: string;
+  goalTitle: string;
+  partnerName: string;
+};
+
 export type GoalsStackParamList = {
   GoalsList: undefined;
   Goal: GoalRouteParams;
   Settings: undefined;
   DeleteAccount: undefined;
   StepDetail: { goalId: string };
+  Comments: CommentThreadParams;
 };
 
 export type TodayStackParamList = {
   TodayMain: undefined;
   Goal: GoalRouteParams;
   StepDetail: { goalId: string };
+  Comments: CommentThreadParams;
 };
 
 const Stack = createNativeStackNavigator<GoalsStackParamList>();
@@ -39,6 +50,11 @@ export default function GoalsStackNavigator() {
         name="Goal"
         component={GoalScreen}
         options={{ title: '', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="Comments"
+        component={CommentThreadScreen}
+        options={{ title: 'Comments', headerTitleAlign: 'center' }}
       />
       <Stack.Screen
         name="Settings"

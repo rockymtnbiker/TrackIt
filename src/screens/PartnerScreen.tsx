@@ -57,17 +57,15 @@ const TONE_COLOR: Record<AnalysisTone, string> = {
 };
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  if (
-    error &&
-    typeof error === 'object' &&
-    'message' in error &&
-    typeof error.message === 'string' &&
-    error.message
-  ) {
-    return error.message;
+  if (error && typeof error === 'object') {
+    const row = error as { message?: unknown; code?: unknown; details?: unknown };
+    const message = typeof row.message === 'string' ? row.message.trim() : '';
+    const code = typeof row.code === 'string' ? row.code.trim() : '';
+    const details = typeof row.details === 'string' ? row.details.trim() : '';
+    const parts = [message, code ? `(${code})` : '', details].filter(Boolean);
+    if (parts.length > 0) {
+      return parts.join(' ');
+    }
   }
   return 'Sharing was not updated.';
 }
@@ -165,10 +163,16 @@ export default function PartnerScreen({ navigation, route }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [theirError, setTheirError] = useState<string | null>(null);
+  const [mineError, setMineError] = useState<string | null>(null);
+  const [sharesError, setSharesError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!partnerId) {
       setLoadError('This partner could not be opened.');
+      setTheirError(null);
+      setMineError(null);
+      setSharesError(null);
       setSharedGoals([]);
       setSharedEntries([]);
       setMyGoals([]);
@@ -178,22 +182,36 @@ export default function PartnerScreen({ navigation, route }: Props) {
       return;
     }
     setLoadError(null);
-    try {
-      const [shared, mine, shares] = await Promise.all([
-        getGoalsSharedWithMe(partnerId),
-        getAllGoals(),
-        getMySharesWith(partnerId),
-      ]);
-      setSharedGoals(shared.goals);
-      setSharedEntries(shared.entries);
-      setMyGoals(mine);
-      setSharedIds(new Set(shares.map((share) => share.goalId)));
-    } catch (error) {
-      setLoadError(errorMessage(error));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    const [sharedResult, mineResult, sharesResult] = await Promise.allSettled([
+      getGoalsSharedWithMe(partnerId),
+      getAllGoals(),
+      getMySharesWith(partnerId),
+    ]);
+
+    if (sharedResult.status === 'fulfilled') {
+      setSharedGoals(sharedResult.value.goals);
+      setSharedEntries(sharedResult.value.entries);
+      setTheirError(null);
+    } else {
+      setTheirError(errorMessage(sharedResult.reason));
     }
+
+    if (mineResult.status === 'fulfilled') {
+      setMyGoals(mineResult.value);
+      setMineError(null);
+    } else {
+      setMineError(errorMessage(mineResult.reason));
+    }
+
+    if (sharesResult.status === 'fulfilled') {
+      setSharedIds(new Set(sharesResult.value.map((share) => share.goalId)));
+      setSharesError(null);
+    } else {
+      setSharesError(errorMessage(sharesResult.reason));
+    }
+
+    setLoading(false);
+    setRefreshing(false);
   }, [partnerId]);
 
   useFocusEffect(
@@ -389,7 +407,8 @@ export default function PartnerScreen({ navigation, route }: Props) {
 
       <Text style={styles.section}>Their goals</Text>
       <View style={styles.card}>
-        {theirGoals.length === 0 ? (
+        {theirError ? <Text style={styles.sectionError}>{theirError}</Text> : null}
+        {theirError && theirGoals.length === 0 ? null : theirGoals.length === 0 ? (
           <Text style={styles.empty}>{name} hasn't shared any goals yet.</Text>
         ) : (
           theirGoals.map((goal, index) => {
@@ -465,7 +484,9 @@ export default function PartnerScreen({ navigation, route }: Props) {
         Sharing a goal includes all its steps. {name} can see progress but can't change anything.
       </Text>
       <View style={styles.card}>
-        {shareable.length === 0 ? (
+        {mineError ? <Text style={styles.sectionError}>{mineError}</Text> : null}
+        {sharesError ? <Text style={styles.sectionError}>{sharesError}</Text> : null}
+        {mineError && shareable.length === 0 ? null : shareable.length === 0 ? (
           <Text style={styles.empty}>No active goals.</Text>
         ) : (
           shareable.map((goal, index) => (
@@ -574,6 +595,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#c62828',
     marginBottom: 12,
+  },
+  sectionError: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#c62828',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
   goalRow: {
     flexDirection: 'row',

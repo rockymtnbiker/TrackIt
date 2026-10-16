@@ -37,7 +37,7 @@ function partnerLabel(connection: Connection): string {
   if (email) {
     return email;
   }
-  return 'Partner';
+  return 'Workout partner';
 }
 
 function blockedByMe(connection: Connection): boolean {

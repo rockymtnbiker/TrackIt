@@ -1,15 +1,17 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import BlockedScreen from '../screens/BlockedScreen';
+import CommentThreadScreen from '../screens/CommentThreadScreen';
 import CommunityScreen from '../screens/CommunityScreen';
 import GoalScreen from '../screens/GoalScreen';
 import PartnerScreen from '../screens/PartnerScreen';
-import type { GoalRouteParams } from './GoalsStackNavigator';
+import type { CommentThreadParams, GoalRouteParams } from './GoalsStackNavigator';
 
 export type CommunityStackParamList = {
   CommunityMain: undefined;
   Partner: { connectionId: string; name: string; partnerId: string | null };
   Blocked: undefined;
   Goal: GoalRouteParams;
+  Comments: CommentThreadParams;
 };
 
 const Stack = createNativeStackNavigator<CommunityStackParamList>();
@@ -43,6 +45,11 @@ export default function CommunityStackNavigator() {
         name="Goal"
         component={GoalScreen}
         options={{ title: '', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="Comments"
+        component={CommentThreadScreen}
+        options={{ title: 'Comments', headerTitleAlign: 'center' }}
       />
     </Stack.Navigator>
   );

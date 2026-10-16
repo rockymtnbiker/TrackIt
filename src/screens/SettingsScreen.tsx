@@ -243,7 +243,11 @@ export default function SettingsScreen({ navigation }: Props) {
             style={styles.nameInput}
           />
         </View>
-        <Text style={styles.helper}>Shown to your partners.</Text>
+        <Text style={styles.helper}>
+          {displayName.trim()
+            ? 'Shown to your partners.'
+            : "Add a name so partners know it's you."}
+        </Text>
         <View style={styles.separator} />
         <View style={styles.row}>
           <Text style={styles.rowLabel}>Email</Text>

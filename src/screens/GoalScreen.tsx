@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { CommentsEntry } from '../components/CommentsEntry';
 import GoalDetailCards from '../components/GoalDetailCards';
 import GoalEditForm, { type GoalEditFormHandle } from '../components/GoalEditForm';
 import { useAuth } from '../context/AuthContext';
@@ -843,6 +844,16 @@ export default function GoalScreen({ navigation, route }: Props) {
         ) : null}
 
         {!editing ? <GoalDetailCards goal={node} /> : null}
+
+        {!editing && node.parentId == null && ownerId ? (
+          <CommentsEntry
+            goalId={node.id}
+            goalTitle={node.title}
+            ownerId={ownerId}
+            readOnly={readOnly}
+            sharedByName={sharedByName}
+          />
+        ) : null}
       </ScrollView>
 
       <Modal visible={logOpen} animationType="fade" transparent onRequestClose={closeLog}>

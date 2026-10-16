@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   Children,
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useRef,
   useState,
@@ -81,6 +82,7 @@ export type GoalEditFormHandle = {
 type Props = {
   goal: Goal;
   nodes: Goal[];
+  title: string;
   onDeleted: () => void;
 };
 
@@ -273,7 +275,7 @@ function StatusCircle({
 }
 
 const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm(
-  { goal, nodes, onDeleted },
+  { goal, nodes, title, onDeleted },
   ref,
 ) {
   const { settings } = useSettings();
@@ -294,6 +296,11 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
   const patch = (next: Partial<Draft>) => {
     setDraft((current) => ({ ...current, ...next }));
   };
+
+  useEffect(() => {
+    draftRef.current = { ...draftRef.current, title };
+    setDraft((current) => (current.title === title ? current : { ...current, title }));
+  }, [title]);
 
   const saveDraft = async (current: Draft): Promise<Goal> => {
     const source = goalRef.current;
@@ -431,46 +438,38 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
   return (
     <>
       <View style={styles.detailCards}>
-        <View style={styles.detailCard}>
-          <FormFieldRow label={DETAIL_LABELS.title}>
-            <FormInlineInput
-              value={draft.title}
-              onChangeText={(title) => patch({ title })}
-              placeholder="Enter title"
-            />
-          </FormFieldRow>
-          {goal.parentId == null ? (
-            <View style={styles.whyBlock}>
-              <Text style={styles.whyLabel}>{DETAIL_LABELS.why}</Text>
-              {whyOpen || draft.why.length > 0 ? (
-                <TextInput
-                  autoFocus={whyOpen}
-                  value={draft.why}
-                  onChangeText={(why) => patch({ why })}
-                  placeholder="What will this change for you?"
-                  multiline
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                  onBlur={() => {
-                    if (!draft.why.trim()) {
-                      setWhyOpen(false);
-                    }
-                  }}
-                  style={formFieldStyles.formMultilineInput}
-                />
-              ) : (
-                <Pressable
-                  onPress={() => setWhyOpen(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Add your why"
-                  style={styles.whyAddHit}
-                >
-                  <Text style={styles.whyAdd}>+ Add your why</Text>
-                </Pressable>
-              )}
-            </View>
-          ) : null}
-        </View>
+        {goal.parentId == null ? (
+          <View style={styles.whyCard}>
+            <Text style={styles.whySectionLabel}>{DETAIL_LABELS.why}</Text>
+            {whyOpen || draft.why.length > 0 ? (
+              <TextInput
+                autoFocus={whyOpen}
+                value={draft.why}
+                onChangeText={(why) => patch({ why })}
+                placeholder="What will this change for you?"
+                placeholderTextColor="#8e8e93"
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                onBlur={() => {
+                  if (!draft.why.trim()) {
+                    setWhyOpen(false);
+                  }
+                }}
+                style={formFieldStyles.formMultilineInput}
+              />
+            ) : (
+              <Pressable
+                onPress={() => setWhyOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Add your why"
+                style={styles.whyAddHit}
+              >
+                <Text style={styles.whyAdd}>+ Add your why</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : null}
 
         <DetailCard title={DETAIL_LABELS.timeline} guide="When does this happen?">
           <TimelineRows>
@@ -782,13 +781,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B6B70',
   },
-  whyBlock: {
-    gap: 6,
+  whyCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    gap: 8,
   },
-  whyLabel: {
-    fontSize: 15,
+  whySectionLabel: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#111',
+    color: '#6B6B70',
+    textTransform: 'uppercase',
   },
   whyAddHit: {
     minHeight: 44,

@@ -32,6 +32,7 @@ import {
 import { periodTotalAsOf } from '../lib/asOfDate';
 import {
   createGoal,
+  convertRepeatingToParent,
   deleteEntry,
   deleteEntryById,
   getAllGoals,
@@ -174,7 +175,6 @@ export default function GoalScreen({ navigation, route }: Props) {
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const today = todayDateString();
-  const addRef = useRef<TextInput>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [node, setNode] = useState<Goal | null>(null);
@@ -183,13 +183,15 @@ export default function GoalScreen({ navigation, route }: Props) {
   const [children, setChildren] = useState<Goal[]>([]);
   const [newTitle, setNewTitle] = useState('');
   const [adding, setAdding] = useState(false);
-  const [showAdd, setShowAdd] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logAmount, setLogAmount] = useState('');
   const [logError, setLogError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
   const [saving, setSaving] = useState(false);
   const entryBusy = useRef(false);
+  const addInputRef = useRef<TextInput>(null);
+  const focusAddRef = useRef(false);
   const editRef = useRef<GoalEditFormHandle>(null);
   const allowLeaveRef = useRef(false);
   const editingRef = useRef(editing);
@@ -252,6 +254,14 @@ export default function GoalScreen({ navigation, route }: Props) {
   }, [navigation]);
 
   useEffect(() => {
+    if (!focusAddRef.current || !node || isRepeating(node) || children.length === 0) {
+      return;
+    }
+    focusAddRef.current = false;
+    requestAnimationFrame(() => addInputRef.current?.focus());
+  }, [node, children]);
+
+  useEffect(() => {
     const unsubscribe = navigation.addListener('beforeRemove', (event) => {
       if (allowLeaveRef.current) {
         return;
@@ -284,8 +294,10 @@ export default function GoalScreen({ navigation, route }: Props) {
     void createGoal({ title: trimmed, parentId: node.id })
       .then((created) => {
         setNewTitle('');
-        setShowAdd(false);
-        navigation.push('Goal', { goalId: created.id });
+        setNodes((current) => [...current, created]);
+        setChildren((current) =>
+          [...current, created].sort((a, b) => a.sortOrder - b.sortOrder),
+        );
       })
       .catch((error) => {
         console.warn('Failed to add step', error);
@@ -299,9 +311,46 @@ export default function GoalScreen({ navigation, route }: Props) {
       });
   };
 
-  const revealAdd = () => {
-    setShowAdd(true);
-    requestAnimationFrame(() => addRef.current?.focus());
+  const confirmBreakIntoSteps = () => {
+    if (!node || adding || readOnly || !isRepeating(node) || children.length > 0) {
+      return;
+    }
+    const title = node.title.trim() || 'Untitled';
+    Alert.alert(
+      'Break this into steps?',
+      `Your repeat (e.g. 3× a week) and its history will move into a step called '${title}'. Then you can add more steps.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: () => {
+            void (async () => {
+              setAdding(true);
+              try {
+                await convertRepeatingToParent(node.id);
+                focusAddRef.current = true;
+                await load();
+              } catch (error) {
+                focusAddRef.current = false;
+                const message =
+                  error instanceof Error && error.message
+                    ? error.message
+                    : error &&
+                        typeof error === 'object' &&
+                        'message' in error &&
+                        typeof error.message === 'string' &&
+                        error.message
+                      ? error.message
+                      : 'Could not break this into steps.';
+                Alert.alert('Could not break this into steps', message);
+              } finally {
+                setAdding(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const applySavedGoals = (goals: Goal[]) => {
@@ -510,7 +559,7 @@ export default function GoalScreen({ navigation, route }: Props) {
   }
 
   const saveEdit = async () => {
-    if (!editRef.current || saving) {
+    if (!editRef.current || saving || editTitle.trim().length === 0) {
       return;
     }
     setSaving(true);
@@ -550,20 +599,39 @@ export default function GoalScreen({ navigation, route }: Props) {
   const doses = timesPerDay(node);
   const doseProgress = dayProgress(node, entries, today);
   const sessionsToday = dayCount(entries, node.id, today);
-  const needsSetup =
-    !isTracked(node) && !isRepeating(node) && children.length === 0;
-  const addField = (
+  const canAddStep = !readOnly && !isRepeating(node);
+  const breakIntoSteps = !readOnly && isRepeating(node) && children.length === 0;
+  const addPlaceholder =
+    children.length === 0
+      ? node.parentId == null
+        ? 'Break this goal into smaller steps'
+        : 'Break this step into smaller steps'
+      : 'Add another step';
+  const stepAddField = (
     <TextInput
-      ref={addRef}
+      ref={addInputRef}
       value={newTitle}
       onChangeText={setNewTitle}
-      placeholder="+ Add a step"
+      placeholder={addPlaceholder}
       placeholderTextColor="#8e8e93"
-      style={styles.addInput}
+      style={[styles.addInput, children.length === 0 && styles.addInputSolo]}
       returnKeyType="done"
       editable={!adding}
       onSubmitEditing={addStep}
+      accessibilityLabel={addPlaceholder}
     />
+  );
+  const breakStepButton = (
+    <Pressable
+      onPress={confirmBreakIntoSteps}
+      disabled={adding}
+      style={styles.breakStep}
+      accessibilityRole="button"
+      accessibilityLabel={addPlaceholder}
+      accessibilityState={{ disabled: adding }}
+    >
+      <Text style={styles.breakStepLabel}>{addPlaceholder}</Text>
+    </Pressable>
   );
 
   return (
@@ -590,7 +658,19 @@ export default function GoalScreen({ navigation, route }: Props) {
             </Pressable>
           ) : null}
           <View style={styles.titleLine}>
-            <Text style={styles.title}>{node.title || 'Untitled'}</Text>
+            {editing ? (
+              <TextInput
+                value={editTitle}
+                onChangeText={setEditTitle}
+                placeholder="Untitled"
+                placeholderTextColor="#c7c7cc"
+                style={styles.title}
+                multiline
+                accessibilityLabel="Title"
+              />
+            ) : (
+              <Text style={styles.title}>{node.title || 'Untitled'}</Text>
+            )}
             {readOnly ? null : (
             <View style={styles.titleActions}>
               {editing ? (
@@ -606,18 +686,26 @@ export default function GoalScreen({ navigation, route }: Props) {
                   </Pressable>
                   <Pressable
                     onPress={() => void saveEdit()}
-                    disabled={saving}
+                    disabled={saving || editTitle.trim().length === 0}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="Save"
+                    accessibilityState={{ disabled: saving || editTitle.trim().length === 0 }}
                     style={styles.titleAction}
                   >
-                    <Ionicons name="checkmark" size={28} color="#007aff" />
+                    <Ionicons
+                      name="checkmark"
+                      size={28}
+                      color={saving || editTitle.trim().length === 0 ? '#b0b0b5' : '#007aff'}
+                    />
                   </Pressable>
                 </>
               ) : (
                 <Pressable
-                  onPress={() => setEditing(true)}
+                  onPress={() => {
+                    setEditTitle(node.title);
+                    setEditing(true);
+                  }}
                   hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel="Edit"
@@ -650,6 +738,7 @@ export default function GoalScreen({ navigation, route }: Props) {
             ref={editRef}
             goal={node}
             nodes={nodes}
+            title={editTitle}
             onDeleted={() => {
               allowLeaveRef.current = true;
               navigation.goBack();
@@ -747,7 +836,7 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {!editing && whyText ? (
+        {!editing && node.parentId == null && whyText ? (
           <View style={styles.paddedCard}>
             <Text style={styles.sectionLabel}>Why it matters</Text>
             <Text style={styles.whyQuote}>{`“${whyText}”`}</Text>
@@ -827,19 +916,11 @@ export default function GoalScreen({ navigation, route }: Props) {
                 </Pressable>
               );
             })}
-            {!readOnly && !isRepeating(node) ? (
-              <View style={styles.treeAdd}>{addField}</View>
-            ) : null}
+            {canAddStep ? <View style={styles.treeAdd}>{stepAddField}</View> : null}
           </View>
-        ) : null}
-
-        {!editing && !readOnly && needsSetup ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Set it up</Text>
-            <SetupRow label="Track an amount" onPress={() => setEditing(true)} />
-            <SetupRow label="Repeat" onPress={() => setEditing(true)} />
-            <SetupRow label="Add steps" onPress={revealAdd} />
-            {showAdd ? addField : null}
+        ) : !editing && (canAddStep || breakIntoSteps) ? (
+          <View style={styles.treeCard}>
+            <View style={styles.treeAdd}>{breakIntoSteps ? breakStepButton : stepAddField}</View>
           </View>
         ) : null}
 
@@ -1239,20 +1320,6 @@ function StreakTile({
   );
 }
 
-function SetupRow({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.setupRow, pressed && styles.pressed]}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-    >
-      <Text style={styles.setupLabel}>{label}</Text>
-      <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1312,6 +1379,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: '#111',
+    padding: 0,
   },
   sharedBy: {
     fontSize: 13,
@@ -1356,20 +1424,6 @@ const styles = StyleSheet.create({
     color: '#6b6b70',
     flexShrink: 1,
   },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-  },
-  cardTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#6b6b70',
-    textTransform: 'uppercase',
-    paddingTop: 12,
-    paddingBottom: 4,
-  },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1400,17 +1454,15 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#e5e5ea',
   },
-  setupRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e5ea',
+  addInputSolo: {
+    borderTopWidth: 0,
   },
-  setupLabel: {
+  breakStep: {
+    paddingVertical: 12,
+  },
+  breakStepLabel: {
     fontSize: 17,
-    color: '#111',
+    color: '#007aff',
   },
   pressed: {
     opacity: 0.55,

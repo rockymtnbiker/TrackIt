@@ -124,7 +124,7 @@ export type DetailRow = {
 };
 
 export type DetailSection = {
-  id: 'title' | 'timeline' | 'track' | 'repeat' | 'notes';
+  id: 'timeline' | 'track' | 'repeat' | 'notes';
   title: string | null;
   rows: DetailRow[];
 };
@@ -159,16 +159,6 @@ export function goalDetailSections(goal: Goal, weekStartsOn: WeekStart): DetailS
   const period = goal.repeatPeriod;
   const choice = repeatPeriodChoice(goal);
 
-  const titleRows: DetailRow[] = [
-    { label: DETAIL_LABELS.title, value: goal.title.trim() || EMPTY },
-  ];
-  if (goal.parentId == null) {
-    titleRows.push({
-      label: DETAIL_LABELS.why,
-      value: goal.why?.trim() || EMPTY,
-    });
-  }
-
   const trackRows: DetailRow[] = tracked
     ? [
         { label: DETAIL_LABELS.unit, value: goal.unit?.trim() || EMPTY },
@@ -187,7 +177,6 @@ export function goalDetailSections(goal: Goal, weekStartsOn: WeekStart): DetailS
     : [{ label: DETAIL_LABELS.repeat, value: DETAIL_LABELS.off }];
 
   return [
-    { id: 'title', title: null, rows: titleRows },
     {
       id: 'timeline',
       title: DETAIL_LABELS.timeline,

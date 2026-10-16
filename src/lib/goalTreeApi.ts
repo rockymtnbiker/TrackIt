@@ -304,6 +304,20 @@ export async function createGoal(input: GoalInput): Promise<Goal> {
   return mapRowToNode(data as GoalRow);
 }
 
+/** Move a repeating goal's repeat and logs into a new first step. Returns that step's id. */
+export async function convertRepeatingToParent(goalId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('convert_repeating_to_parent', {
+    p_goal_id: goalId,
+  });
+  if (error) {
+    throw error;
+  }
+  if (typeof data !== 'string' || data.length === 0) {
+    throw new Error('The repeat could not be moved into a step.');
+  }
+  return data;
+}
+
 export async function updateGoal(
   id: string,
   updates: GoalUpdates,

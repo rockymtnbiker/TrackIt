@@ -1,5 +1,5 @@
 import type { GoalEntry, Goal, RepeatPeriod } from '../types/goal';
-import { parseDateString, toDateString, todayDateString } from '../utils/date';
+import { localDateString, parseDateString, toDateString, todayDateString } from '../utils/date';
 import type { WeekStart } from './settingsApi';
 import { endOfWeek, startOfWeek, weekDays } from './week';
 
@@ -305,7 +305,7 @@ function weekDayDates(weekOf: string, weekStartsOn: WeekStart): Date[] {
 }
 
 function dateKey(date: Date): string {
-  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+  return localDateString(date);
 }
 
 export type WeekTarget = {

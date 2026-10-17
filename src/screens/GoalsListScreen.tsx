@@ -4,8 +4,6 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Modal,
   StyleSheet,
   Text,
   View,
@@ -14,21 +12,11 @@ import { Pressable, ScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DraggableItem } from '../components/DraggableItem';
 import { useSettings } from '../context/SettingsContext';
-import { KeyboardSafe } from '../components/KeyboardSafe';
-import { FormFieldRow, FormInlineInput } from '../components/FormFields';
 import {
-  createGoal,
   getAllGoals,
   getEntries,
   reorderGoals,
 } from '../lib/goalTreeApi';
-import {
-  ensureNotificationPermission,
-  markEveningPromptAsked,
-  NOTIFICATION_DENIED_MESSAGE,
-  rebuildReminders,
-  shouldOfferEveningPrompt,
-} from '../lib/reminders';
 import {
   buildChildrenMap,
   isDaily,
@@ -92,10 +80,6 @@ export default function GoalsListScreen({ navigation }: Props) {
   const [entries, setEntries] = useState<GoalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [createVisible, setCreateVisible] = useState(false);
-  const [title, setTitle] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -132,63 +116,7 @@ export default function GoalsListScreen({ navigation }: Props) {
   listRef.current = visibleNodes;
 
   const openCreate = () => {
-    setTitle('');
-    setCreateError(null);
-    setCreateVisible(true);
-  };
-
-  const handleCreate = async () => {
-    const trimmed = title.trim();
-    if (!trimmed || creating) {
-      return;
-    }
-
-    setCreating(true);
-    setCreateError(null);
-    const firstGoal = visibleNodes.length === 0;
-    try {
-      const created = await createGoal({
-        title: trimmed,
-        parentId: null,
-      });
-      setCreateVisible(false);
-      navigation.push('Goal', { goalId: created.id });
-      if (firstGoal && (await shouldOfferEveningPrompt())) {
-        Alert.alert(
-          "Want a nudge at 7 PM if something's left for the day?",
-          undefined,
-          [
-            {
-              text: 'Not now',
-              style: 'cancel',
-              onPress: () => {
-                void markEveningPromptAsked();
-              },
-            },
-            {
-              text: 'Yes',
-              onPress: () => {
-                void (async () => {
-                  await markEveningPromptAsked();
-                  const granted = await ensureNotificationPermission();
-                  if (!granted) {
-                    Alert.alert('Notifications', NOTIFICATION_DENIED_MESSAGE);
-                    return;
-                  }
-                  await rebuildReminders();
-                })();
-              },
-            },
-          ],
-        );
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to create goal.';
-      setCreateError(message);
-    } finally {
-      setCreating(false);
-    }
+    navigation.navigate('GoalSetup');
   };
 
   const reorderNodes = (fromIndex: number, toIndex: number) => {
@@ -312,66 +240,6 @@ export default function GoalsListScreen({ navigation }: Props) {
           ))
         )}
       </ScrollView>
-
-      <Modal
-        visible={createVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setCreateVisible(false)}
-      >
-        <KeyboardSafe style={styles.modalOverlay} keyboardVerticalOffset={0}>
-          <ScrollView
-            contentContainerStyle={styles.modalScroll}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-          >
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Add Goal</Text>
-              <FormFieldRow label="Title">
-                <FormInlineInput
-                  value={title}
-                  onChangeText={setTitle}
-                  placeholder="Enter title"
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={() => {
-                    if (title.trim()) {
-                      void handleCreate();
-                    }
-                  }}
-                />
-              </FormFieldRow>
-
-              {createError ? (
-                <Text style={styles.errorText}>{createError}</Text>
-              ) : null}
-
-              <View style={styles.modalActions}>
-                <Pressable
-                  onPress={() => setCreateVisible(false)}
-                  style={styles.modalButtonSecondary}
-                >
-                  <Text style={styles.modalButtonSecondaryText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => void handleCreate()}
-                  disabled={creating || !title.trim()}
-                  style={[
-                    styles.modalButtonPrimary,
-                    (creating || !title.trim()) && styles.modalButtonDisabled,
-                  ]}
-                >
-                  {creating ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.modalButtonPrimaryText}>Create</Text>
-                  )}
-                </Pressable>
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardSafe>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -455,62 +323,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     minHeight: 16,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-  },
-  modalScroll: {
-    padding: 20,
-    justifyContent: 'center',
-    flexGrow: 1,
-  },
-  modalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 12,
-    color: '#111',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 16,
-  },
-  modalButtonSecondary: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  modalButtonSecondaryText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#555',
-  },
-  modalButtonPrimary: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#007aff',
-    minWidth: 88,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalButtonDisabled: {
-    backgroundColor: '#a8c8f0',
-  },
-  modalButtonPrimaryText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
   },
   pressed: {
     opacity: 0.7,

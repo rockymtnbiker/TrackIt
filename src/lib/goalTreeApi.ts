@@ -4,7 +4,7 @@ import type {
   GoalStatus,
   RepeatPeriod,
 } from '../types/goal';
-import { todayDateString } from '../utils/date';
+import { localDateString, todayDateString } from '../utils/date';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
 import { normalizeClock } from './clock';
 import { isRepeating, storedTimesPerDay } from './goalTree';
@@ -33,6 +33,7 @@ type GoalRow = {
   planned_days: number[] | null;
   times_per_day?: number | string | null;
   reminder_time?: string | null;
+  starter_key?: string | null;
 };
 
 export type GoalInput = {
@@ -52,6 +53,7 @@ export type GoalInput = {
   plannedDays?: number[] | null;
   timesPerDay?: number | null;
   reminderTime?: string | null;
+  starterKey?: string | null;
 };
 
 export type GoalUpdates = Partial<
@@ -82,6 +84,27 @@ function dateOrNull(value: string | null | undefined): string | null {
     return null;
   }
   return value.slice(0, 10);
+}
+
+/** `created_date` is a timestamptz. Keep its local calendar day, not the UTC date. */
+function createdCalendarDay(value: string | null | undefined): string {
+  if (value == null || value.trim() === '') {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return trimmed.slice(0, 10);
+  }
+  return localDateString(parsed);
+}
+
+/** Noon local, so a timestamptz round-trips to this device's calendar day. */
+function createdDateStamp(date: Date = new Date()): string {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0).toISOString();
 }
 
 function mapRepeatPeriod(
@@ -117,13 +140,14 @@ function mapRowToNode(row: GoalRow): Goal {
     targetEndDate: dateOrNull(row.target_end_date),
     actualStartDate: dateOrNull(row.actual_start_date),
     actualEndDate: dateOrNull(row.actual_end_date),
-    createdDate: (row.created_date ?? '').slice(0, 10),
+    createdDate: createdCalendarDay(row.created_date),
     unit: row.unit,
     targetAmount: amountToNumber(row.target_amount) ?? null,
     repeatPeriod: mapRepeatPeriod(row.repeat_period),
     plannedDays: row.planned_days,
     timesPerDay: storedTimesPerDay(amountToNumber(row.times_per_day) ?? null),
     reminderTime: normalizeClock(row.reminder_time),
+    starterKey: blankToNull(row.starter_key),
   };
 }
 
@@ -301,10 +325,13 @@ export async function createGoal(input: GoalInput): Promise<Goal> {
       target_end_date: dateOrNull(input.targetEndDate),
       actual_start_date: dateOrNull(input.actualStartDate),
       actual_end_date: dateOrNull(input.actualEndDate),
+      created_date: createdDateStamp(),
       unit: blankToNull(input.unit),
       target_amount: input.targetAmount ?? null,
       repeat_period: repeat.repeat_period,
       planned_days: repeat.planned_days,
+      times_per_day: storedTimesPerDay(input.timesPerDay),
+      starter_key: blankToNull(input.starterKey),
     })
     .select('*')
     .single();

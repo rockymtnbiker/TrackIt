@@ -16,7 +16,7 @@ import type { WeekStart } from './settingsApi';
 import { supabase } from './supabase';
 import type { Goal, GoalEntry } from '../types/goal';
 import { navigationRef } from '../navigation/navigationRef';
-import { addDays, parseDateString, todayDateString } from '../utils/date';
+import { addDays, localDateString, parseDateString } from '../utils/date';
 
 export const DEFAULT_CHECKIN = '19:00:00';
 export const DEFAULT_REMINDER = '08:00:00';
@@ -123,7 +123,7 @@ export async function cancelReminders(): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
 
-export function openDoToday(): void {
+export function openDoToday(freshGoalId?: string): void {
   if (!navigationRef.isReady()) {
     return;
   }
@@ -132,7 +132,10 @@ export function openDoToday(): void {
       name: 'Today',
       params: {
         screen: 'TodayMain',
-        params: { focusToday: Date.now() },
+        params: {
+          focusToday: Date.now(),
+          ...(freshGoalId ? { freshGoalId } : {}),
+        },
       },
     }),
   );
@@ -288,7 +291,7 @@ async function collectNotes(): Promise<Note[]> {
   }
   const settings = await getSettings();
   const nodes = await getAllGoals();
-  const today = todayDateString();
+  const today = localDateString();
   const ids = nodes.map((goal) => goal.id);
   const loaded =
     ids.length > 0 ? await getEntries(ids, addDays(today, -LOOKBACK_DAYS), today) : [];

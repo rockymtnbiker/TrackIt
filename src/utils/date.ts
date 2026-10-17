@@ -88,12 +88,16 @@ export function formatScheduledDays(scheduledDays: Weekday[]): string {
     .join(', ');
 }
 
-export function todayDateString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
+/** `YYYY-MM-DD` in the device's local timezone. */
+export function localDateString(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+export function todayDateString(): string {
+  return localDateString();
 }
 
 export function formatDate(dateString: string): string {
@@ -147,10 +151,7 @@ export function dateFromIso(dateString: string): Date {
 }
 
 export function isoFromDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return localDateString(date);
 }
 
 export function toggleDateInLog(log: string[], date: string): string[] {
@@ -162,10 +163,7 @@ export function toggleDateInLog(log: string[], date: string): string[] {
 export function addDays(dateString: string, delta: number): string {
   const date = new Date(`${dateString}T00:00:00`);
   date.setDate(date.getDate() + delta);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return localDateString(date);
 }
 
 export function toDateString(

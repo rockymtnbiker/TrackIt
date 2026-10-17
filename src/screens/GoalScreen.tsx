@@ -71,7 +71,7 @@ import {
   formatDate,
   formatShortDate,
   isPastDate,
-  toDateString,
+  localDateString,
   todayDateString,
 } from '../utils/date';
 import { GoalReadout } from './StepDetailScreen';
@@ -1344,7 +1344,7 @@ function AnalysisCopy({
 }
 
 function dateKey(date: Date): string {
-  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+  return localDateString(date);
 }
 
 function WeekStrip({

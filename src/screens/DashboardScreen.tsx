@@ -50,6 +50,7 @@ import {
   formatShortDate,
   getWeekday,
   parseDateString,
+  localDateString,
   toDateString,
   todayDateString,
   WEEKDAY_SHORT_LABELS,
@@ -460,7 +461,7 @@ function FlameMark() {
 }
 
 function dateKey(date: Date): string {
-  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+  return localDateString(date);
 }
 
 function WeekDots({

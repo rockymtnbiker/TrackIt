@@ -2,8 +2,8 @@ import type { Goal, GoalEntry } from '../types/goal';
 import {
   addDays,
   formatShortDate,
+  localDateString,
   parseDateString,
-  toDateString,
 } from '../utils/date';
 import type { WeekStart } from './settingsApi';
 import { endOfWeek, startOfWeek, weekdayName } from './week';
@@ -54,7 +54,7 @@ function dayWord(count: number): string {
 }
 
 function dateKey(date: Date): string {
-  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+  return localDateString(date);
 }
 
 function hasChildren(node: Goal, nodes: Goal[]): boolean {

@@ -61,6 +61,13 @@ import {
 } from '../lib/goalTree';
 import type { WeekStart } from '../lib/settingsApi';
 import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
+import {
+  ensureNotificationPermission,
+  markEveningPromptAsked,
+  NOTIFICATION_DENIED_MESSAGE,
+  rebuildReminders,
+  shouldOfferEveningPrompt,
+} from '../lib/reminders';
 import type { TodayStackParamList } from '../navigation/GoalsStackNavigator';
 import type { GoalEntry, Goal, GoalStatus } from '../types/goal';
 import {
@@ -71,7 +78,7 @@ import {
   isFutureDate,
   isPastDate,
   parseDateString,
-  toDateString,
+  localDateString,
   todayDateString,
   WEEKDAY_SHORT_LABELS,
 } from '../utils/date';
@@ -1040,7 +1047,7 @@ function controlLabel(
 }
 
 function dateKey(date: Date): string {
-  return toDateString(date.getFullYear(), date.getMonth(), date.getDate());
+  return localDateString(date);
 }
 
 function WeekDots({
@@ -1128,6 +1135,7 @@ function DoRow({
   streak,
   minStreak,
   done,
+  fresh = false,
   control,
   controlDisabled,
   controlLabelText,
@@ -1143,6 +1151,7 @@ function DoRow({
   streak: number;
   minStreak?: number;
   done: boolean;
+  fresh?: boolean;
   control: StepControl;
   controlDisabled: boolean;
   controlLabelText: string;
@@ -1154,7 +1163,11 @@ function DoRow({
   return (
     <Pressable
       onPress={onOpen}
-      style={({ pressed }) => [styles.doRow, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.doRow,
+        fresh && styles.doRowFresh,
+        pressed && styles.pressed,
+      ]}
     >
       <Pressable
         onPress={onControl}
@@ -1178,9 +1191,16 @@ function DoRow({
         <StepControlGraphic control={control} />
       </Pressable>
       <View style={styles.checklistContent}>
-        <Text style={[styles.checklistTitle, done && styles.checklistTitleDone]}>
-          {title}
-        </Text>
+        <View style={styles.titleLine}>
+          <Text style={[styles.checklistTitle, done && styles.checklistTitleDone]}>
+            {title}
+          </Text>
+          {fresh ? (
+            <View style={styles.newPill}>
+              <Text style={styles.newPillText}>New</Text>
+            </View>
+          ) : null}
+        </View>
         <DetailLine
           parentTitle={parentTitle}
           detail={detail}
@@ -1207,6 +1227,7 @@ export default function TodayScreen() {
     useNavigation<NativeStackNavigationProp<TodayStackParamList>>();
   const route = useRoute<RouteProp<TodayStackParamList, 'TodayMain'>>();
   const focusToday = route.params?.focusToday;
+  const freshGoalId = route.params?.freshGoalId;
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const today = todayDateString();
@@ -1228,6 +1249,20 @@ export default function TodayScreen() {
   const selectedDateRef = useRef(selectedDate);
   selectedDateRef.current = selectedDate;
   const listRef = useRef<FlatList<string> | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollHostRef = useRef<View>(null);
+  const scrollOffset = useRef(0);
+  const rowRefs = useRef(new Map<string, View>());
+  const scrolledFresh = useRef<string | null>(null);
+  const handledFresh = useRef<string | null>(null);
+  const highlightRef = useRef<string | null>(null);
+
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [cardGoalId, setCardGoalId] = useState<string | null>(null);
+  const [cardMode, setCardMode] = useState<'prompt' | 'simple' | null>(null);
+  const cardGoalRef = useRef<string | null>(null);
+  highlightRef.current = highlightId;
+  cardGoalRef.current = cardGoalId;
 
   const [nodes, setNodes] = useState<Goal[]>([]);
   const [entries, setEntries] = useState<GoalEntry[]>([]);
@@ -1404,6 +1439,96 @@ export default function TodayScreen() {
     const day = todayDateString();
     showWeekRef.current(startOfWeek(day, weekStartsOn), day);
   }, [focusToday, weekStartsOn]);
+
+  useEffect(() => {
+    if (!freshGoalId || handledFresh.current === freshGoalId) {
+      return;
+    }
+    handledFresh.current = freshGoalId;
+    scrolledFresh.current = null;
+    cardGoalRef.current = freshGoalId;
+    setHighlightId(freshGoalId);
+    setCardGoalId(freshGoalId);
+    setCardMode(null);
+    navigation.setParams({ freshGoalId: undefined });
+    void shouldOfferEveningPrompt().then((offer) => {
+      if (handledFresh.current !== freshGoalId || cardGoalRef.current !== freshGoalId) {
+        return;
+      }
+      setCardMode(offer ? 'prompt' : 'simple');
+    });
+  }, [freshGoalId, navigation]);
+
+  useEffect(() => {
+    if (!highlightId) {
+      return;
+    }
+    const timer = setTimeout(() => setHighlightId(null), 5000);
+    return () => clearTimeout(timer);
+  }, [highlightId]);
+
+  useEffect(() => {
+    if (cardMode !== 'simple') {
+      return;
+    }
+    const timer = setTimeout(() => setCardMode(null), 5000);
+    return () => clearTimeout(timer);
+  }, [cardMode, cardGoalId]);
+
+  const dismissCreatedCard = () => {
+    cardGoalRef.current = null;
+    setCardGoalId(null);
+    setCardMode(null);
+  };
+
+  const declineNudge = () => {
+    void markEveningPromptAsked();
+    dismissCreatedCard();
+  };
+
+  const acceptNudge = () => {
+    void (async () => {
+      await markEveningPromptAsked();
+      const granted = await ensureNotificationPermission();
+      dismissCreatedCard();
+      if (!granted) {
+        Alert.alert('Notifications', NOTIFICATION_DENIED_MESSAGE);
+        return;
+      }
+      await rebuildReminders();
+    })();
+  };
+
+  const scrollFreshRow = (goalId: string) => {
+    if (scrolledFresh.current === goalId) {
+      return;
+    }
+    const row = rowRefs.current.get(goalId);
+    const scroll = scrollRef.current;
+    const host = scrollHostRef.current;
+    if (!row || !scroll || !host) {
+      return;
+    }
+    row.measureInWindow((_rowX, rowY) => {
+      host.measureInWindow((_scrollX, scrollTop) => {
+        if (scrolledFresh.current === goalId) {
+          return;
+        }
+        scrolledFresh.current = goalId;
+        scroll.scrollTo({
+          y: Math.max(0, scrollOffset.current + (rowY - scrollTop) - 16),
+          animated: true,
+        });
+      });
+    });
+  };
+
+  const clearHighlightOnTouch = () => {
+    if (highlightRef.current) {
+      setHighlightId(null);
+    }
+    return false;
+  };
 
   const appliedWeekStart = useRef(weekStartsOn);
   useEffect(() => {
@@ -1740,8 +1865,24 @@ export default function TodayScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView
+      style={styles.container}
+      edges={['top']}
+      onStartShouldSetResponderCapture={clearHighlightOnTouch}
+    >
+    <View ref={scrollHostRef} style={styles.container}>
+    <ScrollView
+      ref={scrollRef}
+      onScroll={(event) => {
+        scrollOffset.current = event.nativeEvent.contentOffset.y;
+      }}
+      scrollEventThrottle={16}
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        cardMode ? styles.contentWithCard : null,
+      ]}
+    >
       <View style={styles.headerBlock}>
       <View style={styles.weekHeader}>
         <View style={styles.weekRange}>
@@ -1885,21 +2026,45 @@ export default function TodayScreen() {
                   if (futureDay) {
                     return;
                   }
+                  const createdRow = step.id === cardGoalId;
                   if (control.action === 'log') {
                     openLog(step.id);
+                    if (createdRow) {
+                      dismissCreatedCard();
+                    }
                     return;
                   }
                   if (!row) {
                     handleOneTime(step, appearance);
+                    if (createdRow) {
+                      dismissCreatedCard();
+                    }
                     return;
                   }
                   if (control.action === 'toggle') {
                     handleYesNo(step);
+                    if (createdRow) {
+                      dismissCreatedCard();
+                    }
                   }
                 };
 
                 return (
-                  <View key={step.id}>
+                  <View
+                    key={step.id}
+                    ref={(node) => {
+                      if (node) {
+                        rowRefs.current.set(step.id, node);
+                      } else {
+                        rowRefs.current.delete(step.id);
+                      }
+                    }}
+                    onLayout={
+                      highlightId === step.id
+                        ? () => scrollFreshRow(step.id)
+                        : undefined
+                    }
+                  >
                     {rowIndex > 0 ? <View style={styles.hairline} /> : null}
                     <DoRow
                       title={step.title}
@@ -1912,6 +2077,7 @@ export default function TodayScreen() {
                       controlDisabled={futureDay}
                       controlLabelText={controlLabel(step, control, loggedOnDay)}
                       loggedOnDay={loggedOnDay}
+                      fresh={highlightId === step.id}
                       trailing={
                         row ? (
                           <WeekDots
@@ -1943,6 +2109,55 @@ export default function TodayScreen() {
         </View>
       )}
     </ScrollView>
+      {cardMode ? (
+        <View style={styles.createdCard}>
+          <View style={styles.createdCardHeader}>
+            <Text style={styles.createdCardTitle}>
+              Goal created. Tap the ring to log it.
+            </Text>
+            {cardMode === 'simple' ? (
+              <Pressable
+                onPress={dismissCreatedCard}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={20} color="#666" />
+              </Pressable>
+            ) : null}
+          </View>
+          {cardMode === 'prompt' ? (
+            <>
+              <Text style={styles.createdCardBody}>
+                Want a nudge at 7 PM if something's left for the day?
+              </Text>
+              <View style={styles.createdCardActions}>
+                <Pressable
+                  onPress={declineNudge}
+                  style={({ pressed }) => [
+                    styles.createdCardSecondary,
+                    pressed && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.createdCardSecondaryText}>Not now</Text>
+                </Pressable>
+                <Pressable
+                  onPress={acceptNudge}
+                  style={({ pressed }) => [
+                    styles.createdCardPrimary,
+                    pressed && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.createdCardPrimaryText}>Yes, remind me</Text>
+                </Pressable>
+              </View>
+            </>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
 
       <Modal
         visible={logStep != null}
@@ -2026,6 +2241,89 @@ const styles = StyleSheet.create({
   content: {
     paddingTop: 12,
     paddingBottom: 24,
+  },
+  contentWithCard: {
+    paddingBottom: 150,
+  },
+  doRowFresh: {
+    borderWidth: 2,
+    borderColor: '#007aff',
+    borderRadius: 10,
+    marginHorizontal: 6,
+    marginVertical: 4,
+  },
+  titleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  newPill: {
+    backgroundColor: '#007aff',
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  newPillText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  createdCard: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 8,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  createdCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  createdCardTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111',
+  },
+  createdCardBody: {
+    fontSize: 15,
+    color: '#333',
+    lineHeight: 20,
+  },
+  createdCardActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  createdCardSecondary: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  createdCardSecondaryText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#555',
+  },
+  createdCardPrimary: {
+    backgroundColor: '#007aff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  createdCardPrimaryText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
   },
   headerBlock: {
     paddingHorizontal: 12,
@@ -2281,6 +2579,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   checklistTitle: {
+    flexShrink: 1,
     fontSize: 17,
     fontWeight: '500',
     color: '#1C1C1E',

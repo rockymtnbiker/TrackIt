@@ -2,6 +2,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import CommentThreadScreen from '../screens/CommentThreadScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import GoalScreen from '../screens/GoalScreen';
+import GoalSetupScreen from '../screens/GoalSetupScreen';
 import GoalsListScreen from '../screens/GoalsListScreen';
 import HelpReachingGoalsScreen from '../screens/HelpReachingGoalsScreen';
 import HelpSettingGoalsScreen from '../screens/HelpSettingGoalsScreen';
@@ -24,6 +25,7 @@ export type CommentThreadParams = {
 
 export type GoalsStackParamList = {
   GoalsList: undefined;
+  GoalSetup: undefined;
   Goal: GoalRouteParams;
   Profile: undefined;
   HelpSettingGoals: undefined;
@@ -34,7 +36,7 @@ export type GoalsStackParamList = {
 };
 
 export type TodayStackParamList = {
-  TodayMain: { focusToday?: number } | undefined;
+  TodayMain: { focusToday?: number; freshGoalId?: string } | undefined;
   Goal: GoalRouteParams;
   StepDetail: { goalId: string };
   Comments: CommentThreadParams;
@@ -49,6 +51,11 @@ export default function GoalsStackNavigator() {
         name="GoalsList"
         component={GoalsListScreen}
         options={{ headerShown: false, title: 'Plan', headerBackTitle: 'Plan' }}
+      />
+      <Stack.Screen
+        name="GoalSetup"
+        component={GoalSetupScreen}
+        options={{ title: 'Step 1 of 3', headerTitleAlign: 'center' }}
       />
       <Stack.Screen
         name="Goal"

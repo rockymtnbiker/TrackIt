@@ -139,6 +139,7 @@ function mapGoal(row: GoalRow): Goal {
     plannedDays: row.planned_days,
     timesPerDay: storedTimesPerDay(amountToNumber(row.times_per_day) ?? null),
     reminderTime: null,
+    starterKey: null,
   };
 }
 

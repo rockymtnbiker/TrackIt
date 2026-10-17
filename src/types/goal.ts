@@ -25,6 +25,8 @@ export type Goal = {
   timesPerDay: number;
   /** Local time `HH:MM:SS`, or null when this step has no reminder. */
   reminderTime: string | null;
+  /** Starter that prefilled this goal, or null when it was written by hand. */
+  starterKey: string | null;
 };
 
 export type GoalEntry = {

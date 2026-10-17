@@ -3,7 +3,9 @@ import CommentThreadScreen from '../screens/CommentThreadScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalsListScreen from '../screens/GoalsListScreen';
-import SettingsScreen from '../screens/SettingsScreen';
+import HelpReachingGoalsScreen from '../screens/HelpReachingGoalsScreen';
+import HelpSettingGoalsScreen from '../screens/HelpSettingGoalsScreen';
+import ProfileScreen from '../screens/ProfileScreen';
 
 export type GoalRouteParams = {
   goalId: string;
@@ -23,7 +25,9 @@ export type CommentThreadParams = {
 export type GoalsStackParamList = {
   GoalsList: undefined;
   Goal: GoalRouteParams;
-  Settings: undefined;
+  Profile: undefined;
+  HelpSettingGoals: undefined;
+  HelpReachingGoals: undefined;
   DeleteAccount: undefined;
   StepDetail: { goalId: string };
   Comments: CommentThreadParams;
@@ -57,9 +61,31 @@ export default function GoalsStackNavigator() {
         options={{ title: 'Comments', headerTitleAlign: 'center' }}
       />
       <Stack.Screen
-        name="Settings"
-        component={SettingsScreen}
-        options={{ title: 'Settings', headerTitleAlign: 'center' }}
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          title: 'Profile',
+          headerTitleAlign: 'center',
+          headerBackTitle: 'Plan',
+        }}
+      />
+      <Stack.Screen
+        name="HelpSettingGoals"
+        component={HelpSettingGoalsScreen}
+        options={{
+          title: 'Help setting goals',
+          headerTitleAlign: 'center',
+          headerBackTitle: 'Profile',
+        }}
+      />
+      <Stack.Screen
+        name="HelpReachingGoals"
+        component={HelpReachingGoalsScreen}
+        options={{
+          title: 'Help reaching goals',
+          headerTitleAlign: 'center',
+          headerBackTitle: 'Profile',
+        }}
       />
       <Stack.Screen
         name="DeleteAccount"

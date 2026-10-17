@@ -58,14 +58,6 @@ import { STREAK_LOOKBACK_DAYS } from '../utils/streak';
 
 type Props = NativeStackScreenProps<DashboardStackParamList, 'DashboardMain'>;
 
-type DashboardPeriod = 'daily' | 'weekly' | 'monthly';
-
-const DASHBOARD_PERIODS: { id: DashboardPeriod; label: string }[] = [
-  { id: 'daily', label: 'Daily' },
-  { id: 'weekly', label: 'Weekly' },
-  { id: 'monthly', label: 'Monthly' },
-];
-
 const DONUT_SIZE = 148;
 const DONUT_STROKE = 14;
 
@@ -614,7 +606,6 @@ export default function DashboardScreen({ navigation }: Props) {
   const [reviewEntries, setReviewEntries] = useState<GoalEntry[]>([]);
   const [activityEntries, setActivityEntries] = useState<GoalEntry[]>([]);
   const [completedOpen, setCompletedOpen] = useState(false);
-  const [period, setPeriod] = useState<DashboardPeriod>('weekly');
   const [viewedWeek, setViewedWeek] = useState(() =>
     defaultReviewWeek(todayDateString(), weekStartsOn),
   );
@@ -883,28 +874,6 @@ export default function DashboardScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <View style={styles.segmentTrack}>
-          {DASHBOARD_PERIODS.map((option) => {
-            const selected = period === option.id;
-            return (
-              <Pressable
-                key={option.id}
-                onPress={() => setPeriod(option.id)}
-                style={[styles.segment, selected && styles.segmentSelected]}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                accessibilityLabel={option.label}
-              >
-                <Text style={[styles.segmentLabel, selected && styles.segmentLabelSelected]}>
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {period === 'weekly' ? (
-          <>
             <View style={styles.weekHeader}>
               <Text style={styles.weekTitle}>{reviewWeekTitle(weekStart, currentWeek)}</Text>
               <View style={styles.weekNavRow}>
@@ -1129,12 +1098,6 @@ export default function DashboardScreen({ navigation }: Props) {
             >
               <Text style={styles.planButtonText}>Plan next week →</Text>
             </Pressable>
-          </>
-        ) : (
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>Coming soon</Text>
-          </View>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -1175,31 +1138,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
-  segmentTrack: {
-    flexDirection: 'row',
-    backgroundColor: '#e5e5ea',
-    borderRadius: 9,
-    padding: 2,
-    marginBottom: 16,
-  },
-  segment: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 7,
-    borderRadius: 7,
-  },
-  segmentSelected: {
-    backgroundColor: '#fff',
-  },
-  segmentLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#111',
-  },
-  segmentLabelSelected: {
-    color: '#111',
-  },
   weekHeader: {
     marginBottom: 12,
   },
@@ -1238,14 +1176,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 17,
     fontWeight: '600',
-  },
-  placeholder: {
-    paddingVertical: 48,
-    alignItems: 'center',
-  },
-  placeholderText: {
-    fontSize: 15,
-    color: '#8e8e93',
   },
   weeklyCard: {
     backgroundColor: '#fff',

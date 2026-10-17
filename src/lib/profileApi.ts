@@ -33,13 +33,10 @@ export async function getDisplayName(): Promise<string> {
 
 export async function saveDisplayName(displayName: string): Promise<void> {
   const userId = await requireUserId();
-  const { error } = await supabase.from('profiles').upsert(
-    {
-      id: userId,
-      display_name: displayName.trim(),
-    },
-    { onConflict: 'id' },
-  );
+  const { error } = await supabase
+    .from('profiles')
+    .update({ display_name: displayName.trim() })
+    .eq('id', userId);
 
   if (error) {
     throw error;

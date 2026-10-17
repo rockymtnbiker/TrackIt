@@ -15,6 +15,7 @@ import {
 import { ScrollView } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { CommentsEntry } from '../components/CommentsEntry';
+import { DEFAULT_DRAGGABLE_ITEM_HEIGHT, DraggableItem } from '../components/DraggableItem';
 import GoalDetailCards from '../components/GoalDetailCards';
 import GoalEditForm, { type GoalEditFormHandle } from '../components/GoalEditForm';
 import { useAuth } from '../context/AuthContext';
@@ -28,6 +29,7 @@ import {
   goalStreaks,
   stepTree,
   type AnalysisTone,
+  type StepTreeRow,
 } from '../lib/goalAnalysis';
 import { periodTotalAsOf } from '../lib/asOfDate';
 import {
@@ -38,6 +40,7 @@ import {
   getAllGoals,
   getEntries,
   insertEntry,
+  reorderGoals,
   setGoalStatus,
   type UpsertedEntry,
 } from '../lib/goalTreeApi';
@@ -155,6 +158,54 @@ function overdueLine(step: Goal, today: string): string | null {
   return `Overdue · ${formatShortDate(end)}`;
 }
 
+function reorderErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    error.message
+  ) {
+    return error.message;
+  }
+  return 'Could not save the new order.';
+}
+
+function siblingDropIndex(from: number, dy: number, heights: number[], count: number): number {
+  if (count <= 1) {
+    return 0;
+  }
+  const heightAt = (index: number) => {
+    const height = heights[index];
+    return height > 0 ? height : DEFAULT_DRAGGABLE_ITEM_HEIGHT;
+  };
+  let to = Math.max(0, Math.min(count - 1, from));
+  let offset = dy;
+  if (offset > 0) {
+    while (to < count - 1) {
+      const span = (heightAt(to) + heightAt(to + 1)) / 2;
+      if (offset < span / 2) {
+        break;
+      }
+      offset -= span;
+      to += 1;
+    }
+  } else if (offset < 0) {
+    while (to > 0) {
+      const span = (heightAt(to) + heightAt(to - 1)) / 2;
+      if (-offset < span / 2) {
+        break;
+      }
+      offset += span;
+      to -= 1;
+    }
+  }
+  return to;
+}
+
 function StatusMark({ status }: { status: GoalStatus }) {
   if (status === 'pending') {
     return <PendingStatusCircle size={22} color="#b0b0b5" />;
@@ -165,6 +216,144 @@ function StatusMark({ status }: { status: GoalStatus }) {
       size={24}
       color={status === 'done' ? '#34c759' : '#c7c7cc'}
     />
+  );
+}
+
+type StepSiblingListProps = {
+  parentId: string;
+  depth: number;
+  rowById: Map<string, StepTreeRow>;
+  childrenMap: Map<string | null, Goal[]>;
+  nodes: Goal[];
+  entries: GoalEntry[];
+  today: string;
+  readOnly: boolean;
+  onOpen: (id: string) => void;
+  onReorder: (parentId: string, from: number, to: number) => void;
+};
+
+function StepSiblingList({
+  parentId,
+  depth,
+  rowById,
+  childrenMap,
+  nodes,
+  entries,
+  today,
+  readOnly,
+  onOpen,
+  onReorder,
+}: StepSiblingListProps) {
+  const siblings = childrenMap.get(parentId) ?? [];
+  const heightsRef = useRef<number[]>([]);
+
+  return (
+    <>
+      {siblings.map((goal, index) => {
+        const row = rowById.get(goal.id);
+        if (!row) {
+          return null;
+        }
+        const overdue = row.leaf ? overdueLine(goal, today) : null;
+        const nested = childrenMap.get(goal.id) ?? [];
+        const rowBody = (
+          <View
+            style={[
+              styles.treeRow,
+              { paddingLeft: 16 + depth * 36 },
+              (depth > 0 || index > 0) && styles.stepBorder,
+            ]}
+          >
+            {row.leaf ? (
+              goal.status === 'done' ? (
+                <Ionicons name="checkmark-circle" size={24} color="#248A3D" />
+              ) : (
+                <StatusMark status={goal.status} />
+              )
+            ) : (
+              <Ionicons name="folder-outline" size={22} color="#6B6B70" />
+            )}
+            <View style={styles.stepBody}>
+              <Text
+                style={[
+                  row.leaf ? styles.stepTitle : styles.treeParentTitle,
+                  row.leaf && goal.status === 'done' && styles.treeTitleDone,
+                ]}
+                numberOfLines={2}
+              >
+                {goal.title || 'Untitled'}
+              </Text>
+              {row.leaf ? (
+                overdue ? <Text style={styles.overdue}>{overdue}</Text> : null
+              ) : (
+                <Text style={styles.treeCount}>
+                  {row.done} of {row.total} steps
+                </Text>
+              )}
+              {row.leaf ? (
+                <LeafAmountBar node={goal} nodes={nodes} entries={entries} today={today} />
+              ) : null}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+          </View>
+        );
+        const nestedList =
+          nested.length > 0 ? (
+            <StepSiblingList
+              parentId={goal.id}
+              depth={depth + 1}
+              rowById={rowById}
+              childrenMap={childrenMap}
+              nodes={nodes}
+              entries={entries}
+              today={today}
+              readOnly={readOnly}
+              onOpen={onOpen}
+              onReorder={onReorder}
+            />
+          ) : null;
+
+        if (readOnly) {
+          return (
+            <View key={goal.id}>
+              <Pressable
+                onPress={() => onOpen(goal.id)}
+                style={({ pressed }) => [pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel={goal.title || 'Untitled'}
+              >
+                {rowBody}
+              </Pressable>
+              {nestedList}
+            </View>
+          );
+        }
+
+        return (
+          <DraggableItem
+            key={goal.id}
+            index={index}
+            itemHeight={heightsRef.current[index] || DEFAULT_DRAGGABLE_ITEM_HEIGHT}
+            onPress={() => onOpen(goal.id)}
+            onDragStart={() => {}}
+            onDragMove={() => {}}
+            onDragEnd={(from, _to, dy) => {
+              const to = siblingDropIndex(from, dy, heightsRef.current, siblings.length);
+              onReorder(parentId, from, to);
+            }}
+          >
+            <View
+              onLayout={(event) => {
+                heightsRef.current[index] = event.nativeEvent.layout.height;
+              }}
+            >
+              {rowBody}
+              {nestedList}
+            </View>
+          </DraggableItem>
+        );
+      })}
+    </>
   );
 }
 
@@ -196,6 +385,9 @@ export default function GoalScreen({ navigation, route }: Props) {
   const allowLeaveRef = useRef(false);
   const editingRef = useRef(editing);
   editingRef.current = editing;
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const orderVersionRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!ownerId) {
@@ -238,6 +430,52 @@ export default function GoalScreen({ navigation, route }: Props) {
       navigation.push('Goal', { goalId: id });
     },
     [navigation, ownerId, readOnly, sharedByName],
+  );
+
+  const reorderSiblings = useCallback(
+    (parentId: string, from: number, to: number) => {
+      if (readOnly || from === to) {
+        return;
+      }
+      const currentNodes = nodesRef.current;
+      const siblings = currentNodes
+        .filter((item) => item.parentId === parentId)
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+      if (from < 0 || from >= siblings.length) {
+        return;
+      }
+      const clamped = Math.max(0, Math.min(siblings.length - 1, to));
+      if (from === clamped) {
+        return;
+      }
+      const next = [...siblings];
+      const [moved] = next.splice(from, 1);
+      if (!moved) {
+        return;
+      }
+      next.splice(clamped, 0, moved);
+      const ordered = next.map((item, index) => ({ ...item, sortOrder: index }));
+      const byId = new Map(ordered.map((item) => [item.id, item]));
+      const previous = currentNodes;
+      const version = ++orderVersionRef.current;
+      setNodes(currentNodes.map((item) => byId.get(item.id) ?? item));
+      if (parentId === goalId) {
+        setChildren(ordered);
+      }
+      void reorderGoals(ordered.map((item) => item.id)).catch((error) => {
+        if (orderVersionRef.current !== version) {
+          return;
+        }
+        setNodes(previous);
+        setChildren(
+          previous
+            .filter((item) => item.parentId === goalId)
+            .sort((a, b) => a.sortOrder - b.sortOrder),
+        );
+        Alert.alert('Could not reorder steps', reorderErrorMessage(error));
+      });
+    },
+    [goalId, readOnly],
   );
 
   useFocusEffect(
@@ -587,8 +825,10 @@ export default function GoalScreen({ navigation, route }: Props) {
       : null;
   const line = summaryLine(node, weekStartsOn);
   const analysis = goalAnalysis(node, nodes, entries, today, weekStartsOn);
+  const childrenMap = buildChildrenMap(nodes);
   const deal = bigDealSummary(node, nodes, today);
   const tree = deal ? stepTree(node, nodes) : [];
+  const stepRows = new Map(tree.map((row) => [row.id, row]));
   const nextUp =
     deal?.nextUpId != null
       ? (nodes.find((item) => item.id === deal.nextUpId) ?? null)
@@ -641,6 +881,9 @@ export default function GoalScreen({ navigation, route }: Props) {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
+        // The gesture-handler scroll view otherwise cancels the long-press
+        // drag as soon as the finger moves.
+        disallowInterruption={false}
       >
         <View style={styles.titleBlock}>
           {!editing && parent ? (
@@ -858,64 +1101,18 @@ export default function GoalScreen({ navigation, route }: Props) {
 
         {!editing && tree.length > 0 ? (
           <View style={styles.treeCard}>
-            {tree.map((row, index) => {
-              const item = nodes.find((entry) => entry.id === row.id);
-              if (!item) {
-                return null;
-              }
-              const overdue = row.leaf ? overdueLine(item, today) : null;
-              return (
-                <Pressable
-                  key={row.id}
-                  onPress={() => openGoal(item.id)}
-                  style={({ pressed }) => [
-                    styles.treeRow,
-                    { paddingLeft: 16 + row.depth * 36 },
-                    index > 0 && styles.stepBorder,
-                    pressed && styles.pressed,
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel={item.title || 'Untitled'}
-                >
-                  {row.leaf ? (
-                    item.status === 'done' ? (
-                      <Ionicons name="checkmark-circle" size={24} color="#248A3D" />
-                    ) : (
-                      <StatusMark status={item.status} />
-                    )
-                  ) : (
-                    <Ionicons name="folder-outline" size={22} color="#6B6B70" />
-                  )}
-                  <View style={styles.stepBody}>
-                    <Text
-                      style={[
-                        row.leaf ? styles.stepTitle : styles.treeParentTitle,
-                        row.leaf && item.status === 'done' && styles.treeTitleDone,
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {item.title || 'Untitled'}
-                    </Text>
-                    {row.leaf ? (
-                      overdue ? <Text style={styles.overdue}>{overdue}</Text> : null
-                    ) : (
-                      <Text style={styles.treeCount}>
-                        {row.done} of {row.total} steps
-                      </Text>
-                    )}
-                    {row.leaf ? (
-                      <LeafAmountBar
-                        node={item}
-                        nodes={nodes}
-                        entries={entries}
-                        today={today}
-                      />
-                    ) : null}
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-                </Pressable>
-              );
-            })}
+            <StepSiblingList
+              parentId={node.id}
+              depth={0}
+              rowById={stepRows}
+              childrenMap={childrenMap}
+              nodes={nodes}
+              entries={entries}
+              today={today}
+              readOnly={readOnly}
+              onOpen={openGoal}
+              onReorder={reorderSiblings}
+            />
             {canAddStep ? <View style={styles.treeAdd}>{stepAddField}</View> : null}
           </View>
         ) : !editing && (canAddStep || breakIntoSteps) ? (
@@ -1522,6 +1719,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 14,
     paddingVertical: 4,
+    overflow: 'visible',
   },
   treeRow: {
     flexDirection: 'row',

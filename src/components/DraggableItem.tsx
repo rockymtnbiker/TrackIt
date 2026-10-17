@@ -1,6 +1,6 @@
-import { useMemo, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -9,6 +9,15 @@ import Animated, {
 
 export const DEFAULT_DRAGGABLE_ITEM_HEIGHT = 52;
 export const LONG_PRESS_MS = 400;
+
+type DragRelations = {
+  pan: RefObject<GestureType | undefined>;
+  tap: RefObject<GestureType | undefined>;
+};
+
+// Nested rows block the ancestor drag so a long-press on a sub-step
+// reorders that sibling group instead of the parent branch.
+const OuterDragContext = createContext<DragRelations | null>(null);
 
 type Props = {
   index: number;
@@ -19,7 +28,7 @@ type Props = {
   onPress?: () => void;
   onDragStart: () => void;
   onDragMove: (dy: number) => void;
-  onDragEnd: (fromIndex: number, toIndex: number) => void;
+  onDragEnd: (fromIndex: number, toIndex: number, dy: number) => void;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
 };
@@ -53,6 +62,10 @@ export function DraggableItem({
 
   const translateY = useSharedValue(0);
   const lifted = useSharedValue(0);
+  const outerDrag = useContext(OuterDragContext);
+  const panRef = useRef<GestureType | undefined>(undefined);
+  const tapRef = useRef<GestureType | undefined>(undefined);
+  const dragRelations = useRef<DragRelations>({ pan: panRef, tap: tapRef });
 
   const beginDrag = () => {
     dragSessionRef.current = true;
@@ -73,7 +86,7 @@ export function DraggableItem({
       0,
       fromIndex + Math.round(dy / itemHeightRef.current),
     );
-    onDragEndRef.current(fromIndex, toIndex);
+    onDragEndRef.current(fromIndex, toIndex, dy);
   };
 
   const handlePress = () => {
@@ -106,8 +119,13 @@ export function DraggableItem({
           lifted.value = withTiming(0, { duration: 120 });
         }
       });
+    panRef.current = pan;
+    if (outerDrag) {
+      pan.blocksExternalGesture(outerDrag.pan, outerDrag.tap);
+    }
 
     if (!onPress) {
+      tapRef.current = undefined;
       return pan;
     }
 
@@ -121,11 +139,15 @@ export function DraggableItem({
       .onEnd(() => {
         handlePress();
       });
+    tapRef.current = tap;
+    if (outerDrag) {
+      tap.blocksExternalGesture(outerDrag.pan, outerDrag.tap);
+    }
 
     return Gesture.Exclusive(pan, tap);
     // Shared values + refs keep handlers current.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, Boolean(onPress)]);
+  }, [enabled, Boolean(onPress), outerDrag]);
 
   const animatedStyle = useAnimatedStyle(() => {
     const active = lifted.value > 0;
@@ -142,15 +164,17 @@ export function DraggableItem({
   });
 
   return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View
-        style={[styles.base, style, animatedStyle]}
-        accessibilityHint="Long press and drag to reorder"
-        accessibilityRole={onPress ? 'button' : undefined}
-      >
-        {children}
-      </Animated.View>
-    </GestureDetector>
+    <OuterDragContext.Provider value={dragRelations.current}>
+      <GestureDetector gesture={gesture}>
+        <Animated.View
+          style={[styles.base, style, animatedStyle]}
+          accessibilityHint="Long press and drag to reorder"
+          accessibilityRole={onPress ? 'button' : undefined}
+        >
+          {children}
+        </Animated.View>
+      </GestureDetector>
+    </OuterDragContext.Provider>
   );
 }
 

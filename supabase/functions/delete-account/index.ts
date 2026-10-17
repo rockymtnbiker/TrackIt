@@ -141,6 +141,7 @@ Deno.serve(async (request) => {
     await deleteByUserId(admin, 'goal_entries', userId);
     await deleteGoals(admin, 'goals', userId);
     await deleteByUserId(admin, 'user_settings', userId);
+    await deleteByUserId(admin, 'coaching_interest', userId);
     await deleteGoals(admin, 'goals_v2', userId);
     await deleteByUserId(admin, 'habit_completions', userId);
     await deleteByUserId(admin, 'habits', userId);

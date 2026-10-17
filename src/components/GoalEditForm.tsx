@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 import { DatePickerModal } from './DatePickerModal';
+import { TimePickerModal } from './TimePickerModal';
 import {
   FormDateRow,
   FormFieldRow,
@@ -45,6 +46,13 @@ import { UNIT_OPTIONS } from '../constants';
 import type { Goal, GoalStatus, RepeatPeriod } from '../types/goal';
 import { nextGoalStatus } from '../types';
 import { dateFromIso, isoFromDate, todayDateString } from '../utils/date';
+import { formatTime } from '../utils/formatTime';
+import { clockFromDate, dateAtClock, normalizeClock } from '../lib/clock';
+import {
+  DEFAULT_REMINDER,
+  ensureNotificationPermission,
+  NOTIFICATION_DENIED_MESSAGE,
+} from '../lib/reminders';
 
 const CUSTOM_UNIT = '__custom__';
 const ALL_PLANNED_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -72,6 +80,8 @@ type Draft = {
   actualEndDate: string;
   targetStartDate: string;
   targetEndDate: string;
+  remindOn: boolean;
+  reminderTime: string;
 };
 
 export type GoalEditFormHandle = {
@@ -128,6 +138,8 @@ function draftFromGoal(goal: Goal): Draft {
     actualEndDate: goal.actualEndDate ?? '',
     targetStartDate: goal.targetStartDate ?? '',
     targetEndDate: goal.targetEndDate ?? '',
+    remindOn: goal.reminderTime != null,
+    reminderTime: goal.reminderTime ?? DEFAULT_REMINDER,
   };
 }
 
@@ -286,6 +298,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
     initialDate: string;
     minimumDate: string | null;
   } | null>(null);
+  const [reminderPicker, setReminderPicker] = useState(false);
   const draftRef = useRef(draft);
   const goalRef = useRef(goal);
   const nodesRef = useRef(nodes);
@@ -345,6 +358,10 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
       targetStartDate: current.targetStartDate.trim() || null,
       targetEndDate: current.targetEndDate.trim() || null,
       actualEndDate: cappedToToday(current.actualEndDate),
+      reminderTime:
+        current.remindOn && (buildChildrenMap(nodes).get(source.id)?.length ?? 0) === 0
+          ? normalizeClock(current.reminderTime) ?? DEFAULT_REMINDER
+          : null,
     };
 
     const statusChanged = current.status !== source.status;
@@ -370,6 +387,43 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
   }));
 
   const hasChildren = (buildChildrenMap(nodes).get(goal.id)?.length ?? 0) > 0;
+  const showReminder = !hasChildren;
+  const setReminder = (on: boolean) => {
+    void (async () => {
+      if (!on) {
+        patch({ remindOn: false });
+        return;
+      }
+      const granted = await ensureNotificationPermission();
+      if (!granted) {
+        Alert.alert('Notifications', NOTIFICATION_DENIED_MESSAGE);
+      }
+      patch({
+        remindOn: true,
+        reminderTime: draft.reminderTime || DEFAULT_REMINDER,
+      });
+    })();
+  };
+  const reminderRows = showReminder ? (
+    <>
+      <FormFieldRow label="Remind me" labelWidth={118}>
+        <Switch value={draft.remindOn} onValueChange={setReminder} />
+      </FormFieldRow>
+      {draft.remindOn ? (
+        <FormFieldRow label="Time" labelWidth={118}>
+          <Pressable
+            onPress={() => setReminderPicker(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Reminder time"
+          >
+            <Text style={styles.statusWord}>
+              {formatTime(dateAtClock(draft.reminderTime, 8, 0))}
+            </Text>
+          </Pressable>
+        </FormFieldRow>
+      ) : null}
+    </>
+  ) : null;
   const displayUnit = resolvedUnit(draft);
   const today = todayDateString();
   const periodChoice =
@@ -523,6 +577,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
               value={draft.targetEndDate}
               onChange={(targetEndDate) => patch({ targetEndDate })}
             />
+            {!draft.repeatOn ? reminderRows : null}
           </TimelineRows>
         </DetailCard>
 
@@ -695,6 +750,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
               ) : null}
             </View>
           ) : null}
+          {draft.repeatOn ? reminderRows : null}
         </DetailCard>
 
         <DetailCard title={DETAIL_LABELS.notes}>
@@ -733,6 +789,17 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
         </Text>
       </Pressable>
 
+      {reminderPicker ? (
+        <TimePickerModal
+          title="Remind me"
+          value={dateAtClock(draft.reminderTime, 8, 0)}
+          onCancel={() => setReminderPicker(false)}
+          onConfirm={(date) => {
+            setReminderPicker(false);
+            patch({ reminderTime: clockFromDate(date), remindOn: true });
+          }}
+        />
+      ) : null}
       {donePrompt ? (
         <DatePickerModal
           title={DETAIL_LABELS.actualEnd}

@@ -3,8 +3,10 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ReminderSync } from './src/components/ReminderSync';
 import { AuthProvider } from './src/context/AuthContext';
 import { SettingsProvider } from './src/context/SettingsContext';
+import { navigationRef } from './src/navigation/navigationRef';
 import RootNavigator from './src/navigation/RootNavigator';
 
 export default function App() {
@@ -13,8 +15,9 @@ export default function App() {
       <SafeAreaProvider>
         <AuthProvider>
           <SettingsProvider>
-            <NavigationContainer>
+            <NavigationContainer ref={navigationRef}>
               <RootNavigator />
+              <ReminderSync />
               <StatusBar style="auto" />
             </NavigationContainer>
           </SettingsProvider>

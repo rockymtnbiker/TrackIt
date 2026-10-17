@@ -69,6 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    try {
+      const { cancelReminders } = await import('../lib/reminders');
+      await cancelReminders();
+    } catch (error) {
+      console.warn('Failed to cancel reminders', error);
+    }
     const { error } = await supabase.auth.signOut();
     return { error: error?.message ?? null };
   }, []);

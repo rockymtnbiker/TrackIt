@@ -6,6 +6,7 @@ import type {
 } from '../types/goal';
 import { todayDateString } from '../utils/date';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
+import { normalizeClock } from './clock';
 import { isRepeating, storedTimesPerDay } from './goalTree';
 import { captureStatusDates } from './statusDates';
 import { supabase } from './supabase';
@@ -31,6 +32,7 @@ type GoalRow = {
   repeat_period: string | null;
   planned_days: number[] | null;
   times_per_day?: number | string | null;
+  reminder_time?: string | null;
 };
 
 export type GoalInput = {
@@ -49,6 +51,7 @@ export type GoalInput = {
   repeatPeriod?: RepeatPeriod | null;
   plannedDays?: number[] | null;
   timesPerDay?: number | null;
+  reminderTime?: string | null;
 };
 
 export type GoalUpdates = Partial<
@@ -120,7 +123,16 @@ function mapRowToNode(row: GoalRow): Goal {
     repeatPeriod: mapRepeatPeriod(row.repeat_period),
     plannedDays: row.planned_days,
     timesPerDay: storedTimesPerDay(amountToNumber(row.times_per_day) ?? null),
+    reminderTime: normalizeClock(row.reminder_time),
   };
+}
+
+function refreshReminders(): void {
+  void import('./reminders')
+    .then(({ rebuildReminders }) => rebuildReminders())
+    .catch((error) => {
+      console.warn('Failed to rebuild reminders', error);
+    });
 }
 
 const ENTRY_COLUMNS = 'id, goal_id, entry_date, value, created_at';
@@ -301,6 +313,7 @@ export async function createGoal(input: GoalInput): Promise<Goal> {
     throw error;
   }
 
+  refreshReminders();
   return mapRowToNode(data as GoalRow);
 }
 
@@ -369,6 +382,9 @@ export async function updateGoal(
   if (updates.timesPerDay !== undefined) {
     row.times_per_day = storedTimesPerDay(updates.timesPerDay);
   }
+  if (updates.reminderTime !== undefined) {
+    row.reminder_time = normalizeClock(updates.reminderTime);
+  }
 
   const touchesRepeat =
     updates.plannedDays !== undefined || updates.repeatPeriod !== undefined;
@@ -416,6 +432,7 @@ export async function updateGoal(
     throw error;
   }
 
+  refreshReminders();
   return mapRowToNode(data as GoalRow);
 }
 
@@ -462,6 +479,7 @@ export async function setGoalStatus(
     throw error;
   }
 
+  refreshReminders();
   return mapRowToNode(data as GoalRow);
 }
 
@@ -476,6 +494,7 @@ export async function deleteGoal(id: string): Promise<void> {
   if (error) {
     throw error;
   }
+  refreshReminders();
 }
 
 export async function reorderGoals(orderedIds: string[]): Promise<void> {
@@ -616,6 +635,7 @@ export async function insertEntry(
   const goals = logActivates(value)
     ? await activatePendingOnLog(goalId, entry.entryDate, userId)
     : [];
+  refreshReminders();
   return { entry, goals };
 }
 
@@ -635,6 +655,7 @@ export async function deleteEntry(
   if (error) {
     throw error;
   }
+  refreshReminders();
 }
 
 /** Delete one log row. */
@@ -649,4 +670,5 @@ export async function deleteEntryById(entryId: string): Promise<void> {
   if (error) {
     throw error;
   }
+  refreshReminders();
 }

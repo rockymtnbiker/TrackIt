@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -1204,6 +1205,8 @@ function getChecklistHeading(selectedDate: string, today: string): string {
 export default function TodayScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<TodayStackParamList>>();
+  const route = useRoute<RouteProp<TodayStackParamList, 'TodayMain'>>();
+  const focusToday = route.params?.focusToday;
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const today = todayDateString();
@@ -1391,6 +1394,16 @@ export default function TodayScreen() {
     },
     [earliestWeekStart, loadEntryLogs, todayWeekStart, weekStarts, weekStartsOn],
   );
+
+  const showWeekRef = useRef(showWeek);
+  showWeekRef.current = showWeek;
+  useEffect(() => {
+    if (focusToday == null) {
+      return;
+    }
+    const day = todayDateString();
+    showWeekRef.current(startOfWeek(day, weekStartsOn), day);
+  }, [focusToday, weekStartsOn]);
 
   const appliedWeekStart = useRef(weekStartsOn);
   useEffect(() => {

@@ -9,15 +9,24 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { TimePickerModal } from '../components/TimePickerModal';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
+import { clockFromDate, dateAtClock } from '../lib/clock';
 import { getDisplayName, saveDisplayName } from '../lib/profileApi';
+import {
+  DEFAULT_CHECKIN,
+  ensureNotificationPermission,
+  NOTIFICATION_DENIED_MESSAGE,
+} from '../lib/reminders';
 import type { WeekStart } from '../lib/settingsApi';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
+import { formatTime } from '../utils/formatTime';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'Profile'>;
 
@@ -112,6 +121,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [savedName, setSavedName] = useState('');
   const [savingName, setSavingName] = useState(false);
   const [editingName, setEditingName] = useState(false);
+  const [checkinPicker, setCheckinPicker] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +178,20 @@ export default function ProfileScreen({ navigation }: Props) {
         error instanceof Error ? error.message : 'Settings were not saved.',
       );
     }
+  };
+
+  const setEvening = (on: boolean) => {
+    void (async () => {
+      if (on) {
+        const granted = await ensureNotificationPermission();
+        if (!granted) {
+          Alert.alert('Notifications', NOTIFICATION_DENIED_MESSAGE);
+        }
+        await save({ checkinTime: settings.checkinTime ?? DEFAULT_CHECKIN });
+        return;
+      }
+      await save({ checkinTime: null });
+    })();
   };
 
   const confirmLogout = () => {
@@ -294,6 +318,31 @@ export default function ProfileScreen({ navigation }: Props) {
           options={WEEK_OPTIONS}
           onChange={(weekStart) => void save({ weekStart })}
         />
+        <View style={styles.separator} />
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>Evening check-in</Text>
+          <Switch
+            value={settings.checkinTime != null}
+            onValueChange={setEvening}
+            accessibilityLabel="Evening check-in"
+          />
+        </View>
+        {settings.checkinTime != null ? (
+          <>
+            <View style={styles.separator} />
+            <Pressable
+              onPress={() => setCheckinPicker(true)}
+              style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Evening check-in time"
+            >
+              <Text style={styles.rowLabel}>Time</Text>
+              <Text style={styles.valueText}>
+                {formatTime(dateAtClock(settings.checkinTime, 19, 0))}
+              </Text>
+            </Pressable>
+          </>
+        ) : null}
       </View>
 
       <Text style={styles.section}>Account</Text>
@@ -323,6 +372,17 @@ export default function ProfileScreen({ navigation }: Props) {
       </View>
 
       {APP_VERSION ? <Text style={styles.version}>Version {APP_VERSION}</Text> : null}
+      {checkinPicker ? (
+        <TimePickerModal
+          title="Evening check-in"
+          value={dateAtClock(settings.checkinTime ?? DEFAULT_CHECKIN, 19, 0)}
+          onCancel={() => setCheckinPicker(false)}
+          onConfirm={(date) => {
+            setCheckinPicker(false);
+            void save({ checkinTime: clockFromDate(date) });
+          }}
+        />
+      ) : null}
     </ScrollView>
   );
 }

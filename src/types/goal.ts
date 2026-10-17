@@ -23,6 +23,8 @@ export type Goal = {
   plannedDays: number[] | null;
   /** Stored 1–12. Only Daily yes/no steps use a value above 1. */
   timesPerDay: number;
+  /** Local time `HH:MM:SS`, or null when this step has no reminder. */
+  reminderTime: string | null;
 };
 
 export type GoalEntry = {

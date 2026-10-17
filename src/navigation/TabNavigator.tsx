@@ -1,6 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CommunityProvider, useCommunity } from '../context/CommunityContext';
@@ -16,7 +17,7 @@ import GoalsStackNavigator, {
 } from './GoalsStackNavigator';
 
 export type RootTabParamList = {
-  Today: undefined;
+  Today: NavigatorScreenParams<TodayStackParamList> | undefined;
   Goals: undefined;
   Dashboard: undefined;
   Community: undefined;

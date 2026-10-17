@@ -34,7 +34,7 @@ export type GoalsStackParamList = {
 };
 
 export type TodayStackParamList = {
-  TodayMain: undefined;
+  TodayMain: { focusToday?: number } | undefined;
   Goal: GoalRouteParams;
   StepDetail: { goalId: string };
   Comments: CommentThreadParams;

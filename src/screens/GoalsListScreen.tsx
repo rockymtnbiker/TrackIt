@@ -4,6 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   StyleSheet,
   Text,
@@ -21,6 +22,13 @@ import {
   getEntries,
   reorderGoals,
 } from '../lib/goalTreeApi';
+import {
+  ensureNotificationPermission,
+  markEveningPromptAsked,
+  NOTIFICATION_DENIED_MESSAGE,
+  rebuildReminders,
+  shouldOfferEveningPrompt,
+} from '../lib/reminders';
 import {
   buildChildrenMap,
   isDaily,
@@ -137,6 +145,7 @@ export default function GoalsListScreen({ navigation }: Props) {
 
     setCreating(true);
     setCreateError(null);
+    const firstGoal = visibleNodes.length === 0;
     try {
       const created = await createGoal({
         title: trimmed,
@@ -144,6 +153,35 @@ export default function GoalsListScreen({ navigation }: Props) {
       });
       setCreateVisible(false);
       navigation.push('Goal', { goalId: created.id });
+      if (firstGoal && (await shouldOfferEveningPrompt())) {
+        Alert.alert(
+          "Want a nudge at 7 PM if something's left for the day?",
+          undefined,
+          [
+            {
+              text: 'Not now',
+              style: 'cancel',
+              onPress: () => {
+                void markEveningPromptAsked();
+              },
+            },
+            {
+              text: 'Yes',
+              onPress: () => {
+                void (async () => {
+                  await markEveningPromptAsked();
+                  const granted = await ensureNotificationPermission();
+                  if (!granted) {
+                    Alert.alert('Notifications', NOTIFICATION_DENIED_MESSAGE);
+                    return;
+                  }
+                  await rebuildReminders();
+                })();
+              },
+            },
+          ],
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to create goal.';

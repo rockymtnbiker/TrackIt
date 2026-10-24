@@ -1,10 +1,6 @@
 import type { Goal, GoalEntry } from '../types/goal';
-import {
-  addDays,
-  formatShortDate,
-  localDateString,
-  parseDateString,
-} from '../utils/date';
+import { parseLocalDate, toLocalDateString } from './localDate';
+import { addDays, formatShortDate } from '../utils/date';
 import type { WeekStart } from './settingsApi';
 import { endOfWeek, startOfWeek, weekdayName } from './week';
 import { calculateStreak, longestStreak, metWeekStreak } from '../utils/streak';
@@ -39,8 +35,8 @@ const WEEK_WINDOW = 6;
 
 function daysBetween(start: string, end: string): number {
   const ms =
-    parseDateString(end.slice(0, 10)).getTime() -
-    parseDateString(start.slice(0, 10)).getTime();
+    parseLocalDate(end.slice(0, 10)).getTime() -
+    parseLocalDate(start.slice(0, 10)).getTime();
   return Math.round(ms / 86_400_000);
 }
 
@@ -54,7 +50,7 @@ function dayWord(count: number): string {
 }
 
 function dateKey(date: Date): string {
-  return localDateString(date);
+  return toLocalDateString(date);
 }
 
 function hasChildren(node: Goal, nodes: Goal[]): boolean {

@@ -4,7 +4,13 @@ import type {
   GoalStatus,
   RepeatPeriod,
 } from '../types/goal';
-import { localDateString, todayDateString } from '../utils/date';
+import {
+  localCalendarDay,
+  normalizeDateOnly,
+  parseLocalDate,
+  todayLocal,
+  toLocalDateString,
+} from './localDate';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
 import { normalizeClock } from './clock';
 import { isRepeating, storedTimesPerDay } from './goalTree';
@@ -80,31 +86,18 @@ function blankToNull(value: string | null | undefined): string | null {
 }
 
 function dateOrNull(value: string | null | undefined): string | null {
-  if (value == null || value === '') {
-    return null;
-  }
-  return value.slice(0, 10);
+  return normalizeDateOnly(value);
 }
 
-/** `created_date` is a timestamptz. Keep its local calendar day, not the UTC date. */
-function createdCalendarDay(value: string | null | undefined): string {
-  if (value == null || value.trim() === '') {
-    return '';
-  }
-  const trimmed = value.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return trimmed;
-  }
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
-    return trimmed.slice(0, 10);
-  }
-  return localDateString(parsed);
-}
-
-/** Noon local, so a timestamptz round-trips to this device's calendar day. */
+/**
+ * `created_date` is timestamptz default now(), not a date.
+ * Store local noon so the UTC day matches the device day (UTC-12 through UTC+11).
+ * A bare YYYY-MM-DD would be saved as UTC midnight and read back as the previous evening.
+ */
 function createdDateStamp(date: Date = new Date()): string {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0).toISOString();
+  const noon = parseLocalDate(toLocalDateString(date));
+  noon.setHours(12, 0, 0, 0);
+  return noon.toISOString();
 }
 
 function mapRepeatPeriod(
@@ -140,7 +133,7 @@ function mapRowToNode(row: GoalRow): Goal {
     targetEndDate: dateOrNull(row.target_end_date),
     actualStartDate: dateOrNull(row.actual_start_date),
     actualEndDate: dateOrNull(row.actual_end_date),
-    createdDate: createdCalendarDay(row.created_date),
+    createdDate: localCalendarDay(row.created_date),
     unit: row.unit,
     targetAmount: amountToNumber(row.target_amount) ?? null,
     repeatPeriod: mapRepeatPeriod(row.repeat_period),
@@ -165,7 +158,7 @@ function mapRowToEntry(row: EntryRow): GoalEntry {
   return {
     id: row.id,
     goalId: row.goal_id,
-    entryDate: row.entry_date.slice(0, 10),
+    entryDate: normalizeDateOnly(row.entry_date) ?? row.entry_date.slice(0, 10),
     value: amountToNumber(row.value) ?? null,
     createdAt: row.created_at ?? '',
   };
@@ -325,7 +318,7 @@ export async function createGoal(input: GoalInput): Promise<Goal> {
       target_end_date: dateOrNull(input.targetEndDate),
       actual_start_date: dateOrNull(input.actualStartDate),
       actual_end_date: dateOrNull(input.actualEndDate),
-      created_date: createdDateStamp(),
+      created_date: createdDateStamp(parseLocalDate(todayLocal())),
       unit: blankToNull(input.unit),
       target_amount: input.targetAmount ?? null,
       repeat_period: repeat.repeat_period,
@@ -474,7 +467,7 @@ export async function setGoalStatus(
     throw new Error('Step not found.');
   }
 
-  const today = todayDateString();
+  const today = todayLocal();
   const updates = captureStatusDates(status, existing, today, endDate);
   const fillStart = updates.actual_start_date ?? null;
   delete updates.actual_start_date;
@@ -559,10 +552,10 @@ export async function getEntries(
     .order('entry_date', { ascending: true });
 
   if (from) {
-    query = query.gte('entry_date', from);
+    query = query.gte('entry_date', normalizeDateOnly(from) ?? from);
   }
   if (to) {
-    query = query.lte('entry_date', to);
+    query = query.lte('entry_date', normalizeDateOnly(to) ?? to);
   }
 
   const { data, error } = await query;
@@ -594,7 +587,7 @@ async function activatePendingOnLog(
   loggedDay: string,
   userId: string,
 ): Promise<Goal[]> {
-  const day = loggedDay.slice(0, 10);
+  const day = normalizeDateOnly(loggedDay) ?? loggedDay.slice(0, 10);
   const changed: Goal[] = [];
   let currentId: string | null = goalId;
   const seen = new Set<string>();
@@ -648,7 +641,7 @@ export async function insertEntry(
     .insert({
       user_id: userId,
       goal_id: goalId,
-      entry_date: entryDate.slice(0, 10),
+      entry_date: normalizeDateOnly(entryDate) ?? entryDate.slice(0, 10),
       value,
     })
     .select(ENTRY_COLUMNS)
@@ -677,7 +670,7 @@ export async function deleteEntry(
     .delete()
     .eq('user_id', userId)
     .eq('goal_id', goalId)
-    .eq('entry_date', entryDate.slice(0, 10));
+    .eq('entry_date', normalizeDateOnly(entryDate) ?? entryDate.slice(0, 10));
 
   if (error) {
     throw error;

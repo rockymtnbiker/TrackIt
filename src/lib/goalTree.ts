@@ -1,5 +1,6 @@
 import type { GoalEntry, Goal, RepeatPeriod } from '../types/goal';
-import { localDateString, parseDateString, toDateString, todayDateString } from '../utils/date';
+import { normalizeDateOnly, parseLocalDate, toLocalDateString, todayLocal } from './localDate';
+import { toDateString } from '../utils/date';
 import type { WeekStart } from './settingsApi';
 import { endOfWeek, startOfWeek, weekDays } from './week';
 
@@ -9,7 +10,7 @@ export type PeriodRange = {
 };
 
 function daysInMonth(date: string): number {
-  const parsed = parseDateString(date.slice(0, 10));
+  const parsed = parseLocalDate(date.slice(0, 10));
   return new Date(parsed.getFullYear(), parsed.getMonth() + 1, 0).getDate();
 }
 
@@ -21,7 +22,7 @@ export function getPeriodRange(
 ): PeriodRange {
   const day = date.slice(0, 10);
   if (repeatPeriod === 'month') {
-    const parsed = parseDateString(day);
+    const parsed = parseLocalDate(day);
     const year = parsed.getFullYear();
     const monthIndex = parsed.getMonth();
     const lastDay = daysInMonth(day);
@@ -222,7 +223,7 @@ export function weeklyTarget(
     if (goal.targetAmount == null) {
       return null;
     }
-    const anchor = startOfWeek(weekOf?.slice(0, 10) ?? todayDateString(), weekStartsOn);
+    const anchor = startOfWeek(weekOf?.slice(0, 10) ?? todayLocal(), weekStartsOn);
     return (goal.targetAmount * 7) / daysInMonth(anchor);
   }
 
@@ -288,7 +289,7 @@ export function isPeriodTargetMet(
 
 /** Actual start date, or the created date when that is unset. Date only. */
 export function goalStartDate(node: Goal): string {
-  return (node.actualStartDate ?? node.createdDate).slice(0, 10);
+  return normalizeDateOnly(node.actualStartDate) ?? normalizeDateOnly(node.createdDate) ?? '';
 }
 
 /** Repeating steps store planned days. An empty array still repeats. */
@@ -301,11 +302,11 @@ export function isTracked(node: Goal): boolean {
 }
 
 function weekDayDates(weekOf: string, weekStartsOn: WeekStart): Date[] {
-  return weekDays(weekOf, weekStartsOn).map((day) => parseDateString(day));
+  return weekDays(weekOf, weekStartsOn).map((day) => parseLocalDate(day));
 }
 
 function dateKey(date: Date): string {
-  return localDateString(date);
+  return toLocalDateString(date);
 }
 
 export type WeekTarget = {
@@ -486,8 +487,8 @@ export type PaceInfo = {
 
 function calendarDaysBetween(start: string, end: string): number {
   const ms =
-    parseDateString(end.slice(0, 10)).getTime() -
-    parseDateString(start.slice(0, 10)).getTime();
+    parseLocalDate(end.slice(0, 10)).getTime() -
+    parseLocalDate(start.slice(0, 10)).getTime();
   return Math.round(ms / 86_400_000);
 }
 

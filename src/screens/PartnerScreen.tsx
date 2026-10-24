@@ -46,7 +46,8 @@ import type { WeekStart } from '../lib/settingsApi';
 import { startOfWeek, weekDays } from '../lib/week';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
 import type { Goal, GoalEntry } from '../types/goal';
-import { toDateString, todayDateString } from '../utils/date';
+import { todayLocal } from '../lib/localDate';
+import { toDateString } from '../utils/date';
 
 type Props = NativeStackScreenProps<CommunityStackParamList, 'Partner'>;
 
@@ -313,7 +314,7 @@ export default function PartnerScreen({ navigation, route }: Props) {
     });
   }, [navigation, name, connectionId, acting]);
 
-  const today = todayDateString();
+  const today = todayLocal();
   const theirGoals = useMemo(
     () => sharedGoals.filter((goal) => goal.parentId == null),
     [sharedGoals],

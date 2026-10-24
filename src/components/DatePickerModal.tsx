@@ -1,10 +1,10 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { dateFromIso, todayDateString } from '../utils/date';
+import { parseLocalDate, todayLocal } from '../lib/localDate';
 
 function todayAtMidnight(): Date {
-  return dateFromIso(todayDateString());
+  return parseLocalDate(todayLocal());
 }
 
 function clampDate(date: Date, minimumDate?: Date, maximumDate?: Date): Date {

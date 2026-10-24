@@ -25,7 +25,8 @@ import { openDoToday } from '../lib/reminders';
 import type { WeekStart } from '../lib/settingsApi';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { Goal, RepeatPeriod } from '../types/goal';
-import { dateFromIso, formatDateMDY, isoFromDate, todayDateString } from '../utils/date';
+import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
+import { formatDateMDY } from '../utils/date';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalSetup'>;
 
@@ -77,7 +78,7 @@ function clampCount(value: number, max: number): number {
 }
 
 function endOfThisYear(): string {
-  return `${todayDateString().slice(0, 4)}-12-31`;
+  return `${todayLocal().slice(0, 4)}-12-31`;
 }
 
 function parseAmount(value: string): number | null {
@@ -182,7 +183,7 @@ function probe(
     targetEndDate: null,
     actualStartDate: null,
     actualEndDate: null,
-    createdDate: todayDateString(),
+    createdDate: todayLocal(),
     reminderTime: null,
     starterKey: null,
     ...fields,
@@ -628,11 +629,11 @@ export default function GoalSetupScreen({ navigation }: Props) {
       {dateOpen ? (
         <DatePickerModal
           title="Deadline"
-          value={draft.deadline ? dateFromIso(draft.deadline) : null}
+          value={draft.deadline ? parseLocalDate(draft.deadline.slice(0, 10)) : null}
           onCancel={() => setDateOpen(false)}
           onConfirm={(date) => {
             setDateOpen(false);
-            setDraft((current) => ({ ...current, deadline: isoFromDate(date) }));
+            setDraft((current) => ({ ...current, deadline: toLocalDateString(date) }));
           }}
         />
       ) : null}

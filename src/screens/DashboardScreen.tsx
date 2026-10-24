@@ -44,15 +44,13 @@ import {
 import { getAllGoals, getEntries } from '../lib/goalTreeApi';
 import type { DashboardStackParamList, RootTabParamList } from '../navigation/TabNavigator';
 import type { GoalEntry, Goal } from '../types/goal';
+import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
 import {
   addDays,
   formatDateMDY,
   formatShortDate,
   getWeekday,
-  parseDateString,
-  localDateString,
   toDateString,
-  todayDateString,
   WEEKDAY_SHORT_LABELS,
 } from '../utils/date';
 import { STREAK_LOOKBACK_DAYS } from '../utils/streak';
@@ -290,7 +288,7 @@ function barPercent(total: number, target: number | null): number {
 }
 
 function monthEnd(date: string): string {
-  const parsed = parseDateString(date);
+  const parsed = parseLocalDate(date);
   const lastDay = new Date(parsed.getFullYear(), parsed.getMonth() + 1, 0).getDate();
   return toDateString(parsed.getFullYear(), parsed.getMonth(), lastDay);
 }
@@ -461,7 +459,7 @@ function FlameMark() {
 }
 
 function dateKey(date: Date): string {
-  return localDateString(date);
+  return toLocalDateString(date);
 }
 
 function WeekDots({
@@ -608,13 +606,13 @@ export default function DashboardScreen({ navigation }: Props) {
   const [activityEntries, setActivityEntries] = useState<GoalEntry[]>([]);
   const [completedOpen, setCompletedOpen] = useState(false);
   const [viewedWeek, setViewedWeek] = useState(() =>
-    defaultReviewWeek(todayDateString(), weekStartsOn),
+    defaultReviewWeek(todayLocal(), weekStartsOn),
   );
 
   const loadDashboard = useCallback(async () => {
     setLoadError(null);
     try {
-      const today = todayDateString();
+      const today = todayLocal();
       const nextNodes = await getAllGoals();
       const topLevel = nextNodes.filter((node) => node.parentId == null);
       const active = topLevel.filter((node) => node.status !== 'done');
@@ -692,7 +690,7 @@ export default function DashboardScreen({ navigation }: Props) {
     }, [loadDashboard]),
   );
 
-  const today = todayDateString();
+  const today = todayLocal();
   const currentWeek = startOfWeek(today, weekStartsOn);
   const earliestWeek = useMemo(() => {
     if (nodes.length === 0) {
@@ -719,7 +717,7 @@ export default function DashboardScreen({ navigation }: Props) {
   useEffect(() => {
     if (appliedWeekStart.current !== weekStartsOn) {
       appliedWeekStart.current = weekStartsOn;
-      setViewedWeek(defaultReviewWeek(todayDateString(), weekStartsOn));
+      setViewedWeek(defaultReviewWeek(todayLocal(), weekStartsOn));
       return;
     }
     if (loading) {
@@ -750,8 +748,8 @@ export default function DashboardScreen({ navigation }: Props) {
       getWeeklyItems(
         nodes,
         reviewEntries,
-        parseDateString(weekStart),
-        parseDateString(asOf),
+        parseLocalDate(weekStart),
+        parseLocalDate(asOf),
         weekStartsOn,
       ),
     [nodes, reviewEntries, weekStart, asOf, weekStartsOn],
@@ -781,26 +779,26 @@ export default function DashboardScreen({ navigation }: Props) {
     [deadlineGoals, nodes, asOfEntries, asOf],
   );
   const weekDelta = useMemo(() => {
-    const viewedAsOf = parseDateString(asOf);
-    const priorAsOf = parseDateString(addDays(asOf, -7));
+    const viewedAsOf = parseLocalDate(asOf);
+    const priorAsOf = parseLocalDate(addDays(asOf, -7));
     const thisWeek = getWeeklyItems(
       nodes,
       reviewEntries,
-      parseDateString(weekStart),
+      parseLocalDate(weekStart),
       viewedAsOf,
       weekStartsOn,
     );
     const lastWeek = getWeeklyItems(
       nodes,
       reviewEntries,
-      parseDateString(addDays(weekStart, -7)),
+      parseLocalDate(addDays(weekStart, -7)),
       priorAsOf,
       weekStartsOn,
     );
     return thisWeek.donePct - lastWeek.donePct;
   }, [nodes, reviewEntries, weekStart, asOf, weekStartsOn]);
   const weekStreak = useMemo(
-    () => getWeekStreak(nodes, reviewEntries, parseDateString(asOf), weekStartsOn),
+    () => getWeekStreak(nodes, reviewEntries, parseLocalDate(asOf), weekStartsOn),
     [nodes, reviewEntries, asOf, weekStartsOn],
   );
   const activeDates = useMemo(() => {
@@ -826,7 +824,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const atRiskItems = useMemo(
     () =>
       weekStart === currentWeek
-        ? getAtRiskItems(nodes, reviewEntries, parseDateString(today), weekStartsOn)
+        ? getAtRiskItems(nodes, reviewEntries, parseLocalDate(today), weekStartsOn)
         : missedThisWeek(review, nodes, displayEntries, asOf, weekStart, weekStartsOn),
     [weekStart, currentWeek, nodes, reviewEntries, today, review, displayEntries, asOf, weekStartsOn],
   );

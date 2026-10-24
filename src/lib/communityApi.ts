@@ -1,5 +1,6 @@
 import type { Connection, GoalComment, GoalShare } from '../types/community';
 import type { Goal, GoalEntry, GoalStatus, RepeatPeriod } from '../types/goal';
+import { localCalendarDay, normalizeDateOnly } from './localDate';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
 import { buildChildrenMap, storedTimesPerDay } from './goalTree';
 import { supabase } from './supabase';
@@ -95,10 +96,7 @@ function blankToNull(value: string | null | undefined): string | null {
 }
 
 function dateOrNull(value: string | null | undefined): string | null {
-  if (value == null || value === '') {
-    return null;
-  }
-  return value.slice(0, 10);
+  return normalizeDateOnly(value);
 }
 
 function mapRepeatPeriod(value: string | null | undefined): RepeatPeriod | null {
@@ -132,7 +130,7 @@ function mapGoal(row: GoalRow): Goal {
     targetEndDate: dateOrNull(row.target_end_date),
     actualStartDate: dateOrNull(row.actual_start_date),
     actualEndDate: dateOrNull(row.actual_end_date),
-    createdDate: (row.created_date ?? '').slice(0, 10),
+    createdDate: localCalendarDay(row.created_date),
     unit: row.unit,
     targetAmount: amountToNumber(row.target_amount) ?? null,
     repeatPeriod: mapRepeatPeriod(row.repeat_period),
@@ -147,7 +145,7 @@ function mapEntry(row: EntryRow): GoalEntry {
   return {
     id: row.id,
     goalId: row.goal_id,
-    entryDate: row.entry_date.slice(0, 10),
+    entryDate: normalizeDateOnly(row.entry_date) ?? row.entry_date.slice(0, 10),
     value: amountToNumber(row.value) ?? null,
     createdAt: row.created_at ?? '',
   };

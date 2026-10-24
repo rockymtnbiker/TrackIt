@@ -1,4 +1,5 @@
 import type { GoalStatus } from '../types/goal';
+import { normalizeDateOnly } from './localDate';
 
 /**
  * Actual-date rules when a goal's status changes:
@@ -18,13 +19,11 @@ export function captureStatusDates(
   const updates: Record<string, string | null> = { status: newStatus };
 
   if (newStatus === 'active' && !existing.actual_start_date) {
-    updates.actual_start_date = today;
+    updates.actual_start_date = normalizeDateOnly(today) ?? today;
   }
 
   if (newStatus === 'done') {
-    const selected = endDate?.slice(0, 10);
-    updates.actual_end_date =
-      selected && /^\d{4}-\d{2}-\d{2}$/.test(selected) ? selected : today;
+    updates.actual_end_date = normalizeDateOnly(endDate) ?? normalizeDateOnly(today) ?? today;
   } else {
     updates.actual_end_date = null;
   }

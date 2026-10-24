@@ -63,13 +63,8 @@ import type {
 } from '../types/goal';
 import { nextGoalStatus } from '../types';
 import { endOfWeek, startOfWeek, weekdayLabels, weekdayOrder } from '../lib/week';
-import {
-  addDays,
-  dateFromIso,
-  isoFromDate,
-  parseDateString,
-  todayDateString,
-} from '../utils/date';
+import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
+import { addDays } from '../utils/date';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'StepDetail'>;
 
@@ -107,7 +102,7 @@ function cappedToToday(value: string): string | null {
   if (!trimmed) {
     return null;
   }
-  const today = todayDateString();
+  const today = todayLocal();
   return trimmed > today ? today : trimmed;
 }
 
@@ -218,8 +213,8 @@ function formatMetricAmount(value: number): string {
 
 function daysFrom(start: string, end: string): number {
   const ms =
-    parseDateString(end.slice(0, 10)).getTime() -
-    parseDateString(start.slice(0, 10)).getTime();
+    parseLocalDate(end.slice(0, 10)).getTime() -
+    parseLocalDate(start.slice(0, 10)).getTime();
   return Math.round(ms / 86_400_000);
 }
 
@@ -279,7 +274,7 @@ function MetricsSections({
     return null;
   }
 
-  const today = todayDateString();
+  const today = todayLocal();
   const startDate = goalStartDate(node);
   const currentWeek = startOfWeek(today, weekStartsOn);
   const startWeek = startOfWeek(startDate, weekStartsOn);
@@ -298,7 +293,7 @@ function MetricsSections({
   const canGoBack = offset < maxOffset;
   const canGoForward = offset > 0;
 
-  const month = parseDateString(today);
+  const month = parseLocalDate(today);
   const monthStart = `${today.slice(0, 7)}-01`;
   const monthEndDate = new Date(month.getFullYear(), month.getMonth() + 1, 0);
   const monthEnd = `${today.slice(0, 7)}-${String(monthEndDate.getDate()).padStart(2, '0')}`;
@@ -334,7 +329,7 @@ function MetricsSections({
   const currentAvailable = includesCurrent
     ? weekTargetFor(node, currentWeek, weekStartsOn).availableDays
     : [];
-  const elapsedAvailable = currentAvailable.filter((day) => isoFromDate(day) <= today).length;
+  const elapsedAvailable = currentAvailable.filter((day) => toLocalDateString(day) <= today).length;
   const currentWeight =
     currentAvailable.length > 0 ? elapsedAvailable / currentAvailable.length : 0;
   const divisor = includesCurrent
@@ -530,7 +525,7 @@ export function GoalReadout({
   const { settings } = useSettings();
   const displayUnit = node.unit;
   const repeatOn = node.plannedDays !== null;
-  const today = todayDateString();
+  const today = todayLocal();
   const total = displayUnit
     ? repeatOn
       ? periodTotal(node, entries, today, settings.weekStart)
@@ -786,8 +781,8 @@ export default function StepDetailScreen({ navigation, route }: Props) {
       ...(draft.actualStartDate.trim()
         ? {
             actualStartDate:
-              draft.actualStartDate.trim() > todayDateString()
-                ? todayDateString()
+              draft.actualStartDate.trim() > todayLocal()
+                ? todayLocal()
                 : draft.actualStartDate.trim(),
           }
         : {}),
@@ -874,7 +869,7 @@ export default function StepDetailScreen({ navigation, route }: Props) {
         targetEndDate: targetEndDate.trim() || null,
       }
     : null;
-  const today = todayDateString();
+  const today = todayLocal();
   const total =
     progressNode && displayUnit
       ? repeatOn
@@ -1246,7 +1241,7 @@ export default function StepDetailScreen({ navigation, route }: Props) {
               label="Started"
               labelWidth={118}
               value={actualStartDate}
-              maximumDate={dateFromIso(
+              maximumDate={parseLocalDate(
                 actualEndDate.trim() && actualEndDate.trim() < today
                   ? actualEndDate.trim()
                   : today,
@@ -1260,10 +1255,10 @@ export default function StepDetailScreen({ navigation, route }: Props) {
                 value={actualEndDate}
                 minimumDate={
                   actualStartDate.trim()
-                    ? dateFromIso(actualStartDate.trim())
+                    ? parseLocalDate(actualStartDate.trim())
                     : undefined
                 }
-                maximumDate={dateFromIso(today)}
+                maximumDate={parseLocalDate(today)}
                 onChange={setActualEndDate}
               />
             ) : (
@@ -1459,13 +1454,13 @@ export default function StepDetailScreen({ navigation, route }: Props) {
       {donePrompt ? (
         <DatePickerModal
           title="Actual end"
-          value={dateFromIso(donePrompt.initialDate)}
+          value={parseLocalDate(donePrompt.initialDate)}
           minimumDate={
-            donePrompt.minimumDate ? dateFromIso(donePrompt.minimumDate) : undefined
+            donePrompt.minimumDate ? parseLocalDate(donePrompt.minimumDate) : undefined
           }
-          maximumDate={dateFromIso(today)}
+          maximumDate={parseLocalDate(today)}
           onCancel={cancelDoneDate}
-          onConfirm={(date) => confirmDoneDate(isoFromDate(date))}
+          onConfirm={(date) => confirmDoneDate(toLocalDateString(date))}
         />
       ) : null}
     </KeyboardSafe>

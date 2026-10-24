@@ -16,7 +16,8 @@ import type { WeekStart } from './settingsApi';
 import { supabase } from './supabase';
 import type { Goal, GoalEntry } from '../types/goal';
 import { navigationRef } from '../navigation/navigationRef';
-import { addDays, localDateString, parseDateString } from '../utils/date';
+import { normalizeDateOnly, parseLocalDate, todayLocal } from './localDate';
+import { addDays } from '../utils/date';
 
 export const DEFAULT_CHECKIN = '19:00:00';
 export const DEFAULT_REMINDER = '08:00:00';
@@ -161,13 +162,13 @@ function atLocal(day: string, clock: string): Date | null {
   if (!parts) {
     return null;
   }
-  const date = parseDateString(day);
+  const date = parseLocalDate(day);
   date.setHours(parts.hour, parts.minute, 0, 0);
   return date;
 }
 
 function plannedOn(goal: Goal, day: string): boolean {
-  const weekday = parseDateString(day).getDay();
+  const weekday = parseLocalDate(day).getDay();
   return (goal.plannedDays ?? []).includes(weekday);
 }
 
@@ -214,7 +215,7 @@ function oneTimeOpen(goal: Goal, day: string, due: 'on-or-before' | 'on'): boole
   if (isRepeating(goal) || goal.status === 'done' || !startedOnOrBefore(goal, day)) {
     return false;
   }
-  const end = goal.targetEndDate?.slice(0, 10);
+  const end = normalizeDateOnly(goal.targetEndDate);
   if (!end) {
     return false;
   }
@@ -291,7 +292,7 @@ async function collectNotes(): Promise<Note[]> {
   }
   const settings = await getSettings();
   const nodes = await getAllGoals();
-  const today = localDateString();
+  const today = todayLocal();
   const ids = nodes.map((goal) => goal.id);
   const loaded =
     ids.length > 0 ? await getEntries(ids, addDays(today, -LOOKBACK_DAYS), today) : [];

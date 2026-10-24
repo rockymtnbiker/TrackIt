@@ -67,13 +67,8 @@ import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { Goal, GoalEntry, GoalStatus } from '../types/goal';
 import type { WeekStart } from '../lib/settingsApi';
 import { startOfWeek, weekDays } from '../lib/week';
-import {
-  formatDate,
-  formatShortDate,
-  isPastDate,
-  localDateString,
-  todayDateString,
-} from '../utils/date';
+import { toLocalDateString, todayLocal } from '../lib/localDate';
+import { formatDate, formatShortDate, isPastDate } from '../utils/date';
 import { GoalReadout } from './StepDetailScreen';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'Goal'>;
@@ -363,7 +358,7 @@ export default function GoalScreen({ navigation, route }: Props) {
   const ownerId = readOnly ? route.params.ownerId : user?.id;
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
-  const today = todayDateString();
+  const today = todayLocal();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [node, setNode] = useState<Goal | null>(null);
@@ -1344,7 +1339,7 @@ function AnalysisCopy({
 }
 
 function dateKey(date: Date): string {
-  return localDateString(date);
+  return toLocalDateString(date);
 }
 
 function WeekStrip({

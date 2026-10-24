@@ -45,7 +45,7 @@ import { weekdayOrder } from '../lib/week';
 import { UNIT_OPTIONS } from '../constants';
 import type { Goal, GoalStatus, RepeatPeriod } from '../types/goal';
 import { nextGoalStatus } from '../types';
-import { dateFromIso, isoFromDate, todayDateString } from '../utils/date';
+import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
 import { formatTime } from '../utils/formatTime';
 import { clockFromDate, dateAtClock, normalizeClock } from '../lib/clock';
 import {
@@ -105,7 +105,7 @@ function cappedToToday(value: string): string | null {
   if (!trimmed) {
     return null;
   }
-  const today = todayDateString();
+  const today = todayLocal();
   return trimmed > today ? today : trimmed;
 }
 
@@ -337,7 +337,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
         : dailyYesNo
           ? null
           : repeatCount;
-    const today = todayDateString();
+    const today = todayLocal();
     const payload = {
       title: trimmedTitle,
       description: current.description.trim() || null,
@@ -425,7 +425,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
     </>
   ) : null;
   const displayUnit = resolvedUnit(draft);
-  const today = todayDateString();
+  const today = todayLocal();
   const periodChoice =
     repeatPeriodChoice({
       repeatPeriod: draft.repeatOn ? draft.repeatPeriod : null,
@@ -537,7 +537,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
               label={DETAIL_LABELS.started}
               labelWidth={118}
               value={draft.actualStartDate}
-              maximumDate={dateFromIso(
+              maximumDate={parseLocalDate(
                 draft.actualEndDate.trim() && draft.actualEndDate.trim() < today
                   ? draft.actualEndDate.trim()
                   : today,
@@ -551,10 +551,10 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
                 value={draft.actualEndDate}
                 minimumDate={
                   draft.actualStartDate.trim()
-                    ? dateFromIso(draft.actualStartDate.trim())
+                    ? parseLocalDate(draft.actualStartDate.trim())
                     : undefined
                 }
-                maximumDate={dateFromIso(today)}
+                maximumDate={parseLocalDate(today)}
                 onChange={(actualEndDate) => patch({ actualEndDate })}
               />
             ) : (
@@ -803,13 +803,13 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
       {donePrompt ? (
         <DatePickerModal
           title={DETAIL_LABELS.actualEnd}
-          value={dateFromIso(donePrompt.initialDate)}
+          value={parseLocalDate(donePrompt.initialDate)}
           minimumDate={
-            donePrompt.minimumDate ? dateFromIso(donePrompt.minimumDate) : undefined
+            donePrompt.minimumDate ? parseLocalDate(donePrompt.minimumDate) : undefined
           }
-          maximumDate={dateFromIso(today)}
+          maximumDate={parseLocalDate(today)}
           onCancel={cancelDoneDate}
-          onConfirm={(date) => confirmDoneDate(isoFromDate(date))}
+          onConfirm={(date) => confirmDoneDate(toLocalDateString(date))}
         />
       ) : null}
     </>

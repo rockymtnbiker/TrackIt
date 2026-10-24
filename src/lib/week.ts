@@ -1,5 +1,6 @@
 import type { WeekStart } from './settingsApi';
-import { addDays, parseDateString } from '../utils/date';
+import { parseLocalDate } from './localDate';
+import { addDays } from '../utils/date';
 
 const SHORT_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const FULL_NAMES = [
@@ -19,7 +20,7 @@ export function weekdayOrder(weekStartsOn: WeekStart): number[] {
 
 export function startOfWeek(date: string, weekStartsOn: WeekStart): string {
   const day = date.slice(0, 10);
-  const weekday = parseDateString(day).getDay();
+  const weekday = parseLocalDate(day).getDay();
   const offset = (weekday - weekStartsOn + 7) % 7;
   return addDays(day, -offset);
 }
@@ -40,5 +41,5 @@ export function weekdayLabels(weekStartsOn: WeekStart): string[] {
 }
 
 export function weekdayName(date: string): string {
-  return FULL_NAMES[parseDateString(date.slice(0, 10)).getDay()];
+  return FULL_NAMES[parseLocalDate(date.slice(0, 10)).getDay()];
 }

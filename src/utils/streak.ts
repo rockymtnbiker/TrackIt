@@ -1,11 +1,12 @@
-import { addDays, todayDateString } from './date';
+import { todayLocal } from '../lib/localDate';
+import { addDays } from './date';
 
 /** Days of entry history kept so a streak can be counted through today. */
 export const STREAK_LOOKBACK_DAYS = 90;
 
 export function calculateStreak(
   completionLog: string[],
-  referenceDate: string = todayDateString(),
+  referenceDate: string = todayLocal(),
   startedOn?: string,
 ): number {
   const completedDates = new Set(completionLog);

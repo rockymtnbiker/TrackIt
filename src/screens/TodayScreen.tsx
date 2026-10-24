@@ -70,6 +70,7 @@ import {
 } from '../lib/reminders';
 import type { TodayStackParamList } from '../navigation/GoalsStackNavigator';
 import type { GoalEntry, Goal, GoalStatus } from '../types/goal';
+import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
 import {
   addDays,
   formatDate,
@@ -77,9 +78,6 @@ import {
   getWeekday,
   isFutureDate,
   isPastDate,
-  parseDateString,
-  localDateString,
-  todayDateString,
   WEEKDAY_SHORT_LABELS,
 } from '../utils/date';
 import { calculateStreak, STREAK_LOOKBACK_DAYS } from '../utils/streak';
@@ -358,7 +356,7 @@ function detailSubtitle(
     const progress = dayProgress(step, entries, asOf);
     return {
       text:
-        asOf === todayDateString()
+        asOf === todayLocal()
           ? `${progress.count} of ${progress.needed} today`
           : `${progress.count} of ${progress.needed}`,
       overdue: false,
@@ -965,7 +963,7 @@ function InfiniteWeekPager({
         days={weekDays(weekStart, weekStartsOn).map((dateString, index) => ({
           dateString,
           label: weekdayLabels(weekStartsOn)[index] ?? '',
-          dayNumber: parseDateString(dateString).getDate(),
+          dayNumber: parseLocalDate(dateString).getDate(),
         }))}
         today={today}
         selectedDate={selectedDate}
@@ -1047,7 +1045,7 @@ function controlLabel(
 }
 
 function dateKey(date: Date): string {
-  return localDateString(date);
+  return toLocalDateString(date);
 }
 
 function WeekDots({
@@ -1230,7 +1228,7 @@ export default function TodayScreen() {
   const freshGoalId = route.params?.freshGoalId;
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
-  const today = todayDateString();
+  const today = todayLocal();
   const todayWeekStart = startOfWeek(today, weekStartsOn);
 
   const [selectedDate, setSelectedDate] = useState(today);
@@ -1352,7 +1350,7 @@ export default function TodayScreen() {
       weekDays(visibleWeekStart, weekStartsOn).map((dateString, index) => ({
         dateString,
         label: weekdayLabels(weekStartsOn)[index] ?? '',
-        dayNumber: parseDateString(dateString).getDate(),
+        dayNumber: parseLocalDate(dateString).getDate(),
       })),
     [visibleWeekStart, weekStartsOn],
   );
@@ -1436,7 +1434,7 @@ export default function TodayScreen() {
     if (focusToday == null) {
       return;
     }
-    const day = todayDateString();
+    const day = todayLocal();
     showWeekRef.current(startOfWeek(day, weekStartsOn), day);
   }, [focusToday, weekStartsOn]);
 

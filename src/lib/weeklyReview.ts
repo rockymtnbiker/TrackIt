@@ -1,5 +1,6 @@
 import type { Goal, GoalEntry } from '../types/goal';
-import { addDays, parseDateString } from '../utils/date';
+import { normalizeDateOnly, parseLocalDate, toLocalDateString } from './localDate';
+import { addDays } from '../utils/date';
 import { buildChildrenMap, isLeaf, isRepeating, isTracked, periodTotal, weekTargetFor } from './goalTree';
 import type { WeekStart } from './settingsApi';
 import { endOfWeek, startOfWeek } from './week';
@@ -21,18 +22,8 @@ export type WeeklyReview = {
   partialPct: number;
 };
 
-function localDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 function day(value: string | null | undefined): string | null {
-  if (value == null || value === '') {
-    return null;
-  }
-  return value.slice(0, 10);
+  return normalizeDateOnly(value);
 }
 
 /**
@@ -40,7 +31,12 @@ function day(value: string | null | undefined): string | null {
  * the day it was created.
  */
 function startDate(goal: Goal): string {
-  return (goal.actualStartDate ?? goal.targetStartDate ?? goal.createdDate).slice(0, 10);
+  return (
+    normalizeDateOnly(goal.actualStartDate) ??
+    normalizeDateOnly(goal.targetStartDate) ??
+    normalizeDateOnly(goal.createdDate) ??
+    ''
+  );
 }
 
 function parentTitle(goal: Goal, byId: Map<string, Goal>): string | null {
@@ -51,7 +47,7 @@ function parentTitle(goal: Goal, byId: Map<string, Goal>): string | null {
 }
 
 function endOfWeekDate(weekOf: string, weekStartsOn: WeekStart): Date {
-  const end = parseDateString(endOfWeek(weekOf, weekStartsOn));
+  const end = parseLocalDate(endOfWeek(weekOf, weekStartsOn));
   end.setHours(23, 59, 59, 999);
   return end;
 }
@@ -69,9 +65,9 @@ export function getWeeklyItems(
   asOf: Date | undefined,
   weekStartsOn: WeekStart,
 ): WeeklyReview {
-  const start = localDateString(weekStart);
+  const start = toLocalDateString(weekStart);
   const end = endOfWeek(start, weekStartsOn);
-  const cutoff = localDateString(asOf ?? endOfWeekDate(start, weekStartsOn));
+  const cutoff = toLocalDateString(asOf ?? endOfWeekDate(start, weekStartsOn));
   const visibleEntries = entries.filter((entry) => entry.entryDate.slice(0, 10) <= cutoff);
   const childrenMap = buildChildrenMap(goals);
   const byId = new Map(goals.map((goal) => [goal.id, goal]));
@@ -159,7 +155,7 @@ export function getWeekStreak(
     (goal) =>
       isRepeating(goal) && goal.repeatPeriod === 'week',
   );
-  const currentWeekStart = startOfWeek(localDateString(today), weekStartsOn);
+  const currentWeekStart = startOfWeek(toLocalDateString(today), weekStartsOn);
   let streak = 0;
 
   for (let weeksAgo = 1; weeksAgo <= WEEK_STREAK_LOOKBACK; weeksAgo += 1) {
@@ -168,7 +164,7 @@ export function getWeekStreak(
     const review = getWeeklyItems(
       repeatingGoals,
       entries,
-      parseDateString(start),
+      parseLocalDate(start),
       undefined,
       weekStartsOn,
     );
@@ -183,7 +179,7 @@ export function getWeekStreak(
   const current = getWeeklyItems(
     goals,
     entries,
-    parseDateString(currentWeekStart),
+    parseLocalDate(currentWeekStart),
     today,
     weekStartsOn,
   );
@@ -212,7 +208,7 @@ type RankedRisk = AtRiskItem & {
 };
 
 function daysBetween(start: string, end: string): number {
-  const ms = parseDateString(end).getTime() - parseDateString(start).getTime();
+  const ms = parseLocalDate(end).getTime() - parseLocalDate(start).getTime();
   return Math.round(ms / 86_400_000);
 }
 
@@ -236,12 +232,12 @@ export function getAtRiskItems(
   today: Date,
   weekStartsOn: WeekStart,
 ): AtRiskItem[] {
-  const todayString = localDateString(today);
+  const todayString = toLocalDateString(today);
   const weekStart = startOfWeek(todayString, weekStartsOn);
   const review = getWeeklyItems(
     goals,
     entries,
-    parseDateString(weekStart),
+    parseLocalDate(weekStart),
     today,
     weekStartsOn,
   );
@@ -261,7 +257,7 @@ export function getAtRiskItems(
     if (isRepeating(goal) && goal.repeatPeriod === 'week') {
       const { target, availableDays } = weekTargetFor(goal, weekStart, weekStartsOn);
       const span = availableDays.length;
-      const daysLeft = availableDays.filter((day) => localDateString(day) >= todayString).length;
+      const daysLeft = availableDays.filter((day) => toLocalDateString(day) >= todayString).length;
       if (target == null || target <= 0 || daysLeft <= 0 || span <= 0) {
         continue;
       }
@@ -310,7 +306,7 @@ export function getAtRiskItems(
       parentTitle: item.parentTitle,
       detail: overdue
         ? 'overdue'
-        : `due ${WEEKDAY_LABELS[parseDateString(deadline).getDay()]}`,
+        : `due ${WEEKDAY_LABELS[parseLocalDate(deadline).getDay()]}`,
       group: overdue ? 0 : 2,
       severity: overdue ? -daysUntil : 1.5 + (2 - daysUntil) * 0.5,
     });

@@ -1,5 +1,6 @@
 import type { GoalEntry, Goal } from '../types/goal';
-import { addDays, parseDateString, toDateString } from '../utils/date';
+import { parseLocalDate } from './localDate';
+import { addDays, toDateString } from '../utils/date';
 import {
   buildChildrenMap,
   isRepeating,
@@ -12,13 +13,13 @@ export { goalStartDate } from './goalTree';
 
 function calendarDaysBetween(start: string, end: string): number {
   const ms =
-    parseDateString(end.slice(0, 10)).getTime() -
-    parseDateString(start.slice(0, 10)).getTime();
+    parseLocalDate(end.slice(0, 10)).getTime() -
+    parseLocalDate(start.slice(0, 10)).getTime();
   return Math.round(ms / 86_400_000);
 }
 
 function monthOf(date: string): { start: string; end: string; days: number } {
-  const parsed = parseDateString(date.slice(0, 10));
+  const parsed = parseLocalDate(date.slice(0, 10));
   const year = parsed.getFullYear();
   const monthIndex = parsed.getMonth();
   const days = new Date(year, monthIndex + 1, 0).getDate();

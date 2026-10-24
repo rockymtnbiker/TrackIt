@@ -1,5 +1,5 @@
 import type { Goal, GoalEntry } from '../types/goal';
-import { parseDateString } from '../utils/date';
+import { normalizeDateOnly, parseLocalDate } from './localDate';
 import { goalStartDate, isRepeating, periodTotal } from './goalTree';
 import type { WeekStart } from './settingsApi';
 
@@ -8,11 +8,11 @@ export { periodBounds, weeklyTarget } from './goalTree';
 /** True when D is on or after the step's start date. Both sides are local calendar dates. */
 export function startedOnOrBefore(goal: Goal, asOf: string): boolean {
   const start = goalStartDate(goal);
-  const day = asOf.slice(0, 10);
+  const day = normalizeDateOnly(asOf);
   if (!start || !day) {
     return true;
   }
-  return parseDateString(day).getTime() >= parseDateString(start).getTime();
+  return parseLocalDate(day).getTime() >= parseLocalDate(start).getTime();
 }
 
 /**

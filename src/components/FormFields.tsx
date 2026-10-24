@@ -10,7 +10,8 @@ import {
   View,
 } from 'react-native';
 import { DatePickerModal } from './DatePickerModal';
-import { dateFromIso, formatDateMDY, isoFromDate } from '../utils/date';
+import { parseLocalDate, toLocalDateString } from '../lib/localDate';
+import { formatDateMDY } from '../utils/date';
 
 export function FormFieldRow({
   label,
@@ -153,12 +154,12 @@ export function FormDateRow({
       {open ? (
         <DatePickerModal
           title={label}
-          value={value ? dateFromIso(value) : null}
+          value={value ? parseLocalDate(value.slice(0, 10)) : null}
           minimumDate={minimumDate}
           maximumDate={maximumDate}
           onCancel={() => setOpen(false)}
           onConfirm={(date) => {
-            onChange(isoFromDate(date));
+            onChange(toLocalDateString(date));
             setOpen(false);
           }}
         />

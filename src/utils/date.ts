@@ -1,4 +1,5 @@
 import type { Weekday } from '../types';
+import { parseLocalDate, todayLocal, toLocalDateString } from '../lib/localDate';
 
 const WEEKDAY_ORDER: Weekday[] = [
   'sunday',
@@ -22,13 +23,13 @@ export const WEEKDAY_SHORT_LABELS: Record<Weekday, string> = {
   saturday: 'Sat',
 };
 
-export function getWeekday(dateString: string = todayDateString()): Weekday {
-  return WEEKDAY_ORDER[parseDateString(dateString).getDay()];
+export function getWeekday(dateString: string = todayLocal()): Weekday {
+  return WEEKDAY_ORDER[parseLocalDate(dateString.slice(0, 10)).getDay()];
 }
 
 export function isScheduledToday(
   scheduledDays: Weekday[],
-  dateString: string = todayDateString(),
+  dateString: string = todayLocal(),
 ): boolean {
   return scheduledDays.includes(getWeekday(dateString));
 }
@@ -42,14 +43,14 @@ export function compareDateStrings(a: string, b: string): number {
 
 export function isFutureDate(
   dateString: string,
-  referenceToday: string = todayDateString(),
+  referenceToday: string = todayLocal(),
 ): boolean {
   return dateString > referenceToday;
 }
 
 export function isPastDate(
   dateString: string,
-  referenceToday: string = todayDateString(),
+  referenceToday: string = todayLocal(),
 ): boolean {
   return dateString < referenceToday;
 }
@@ -90,18 +91,15 @@ export function formatScheduledDays(scheduledDays: Weekday[]): string {
 
 /** `YYYY-MM-DD` in the device's local timezone. */
 export function localDateString(date: Date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return toLocalDateString(date);
 }
 
 export function todayDateString(): string {
-  return localDateString();
+  return todayLocal();
 }
 
 export function formatDate(dateString: string): string {
-  const date = new Date(`${dateString}T00:00:00`);
+  const date = parseLocalDate(dateString.slice(0, 10));
   return date.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -111,7 +109,7 @@ export function formatDate(dateString: string): string {
 
 /** Short month+day label (e.g. "Jul 26") for compact date ranges. */
 export function formatShortDate(dateString: string): string {
-  const date = new Date(`${dateString}T00:00:00`);
+  const date = parseLocalDate(dateString.slice(0, 10));
   return date.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -147,11 +145,11 @@ export function formatDateMDY(dateString: string): string {
 }
 
 export function dateFromIso(dateString: string): Date {
-  return new Date(`${dateString}T00:00:00`);
+  return parseLocalDate(dateString.slice(0, 10));
 }
 
 export function isoFromDate(date: Date): string {
-  return localDateString(date);
+  return toLocalDateString(date);
 }
 
 export function toggleDateInLog(log: string[], date: string): string[] {
@@ -161,9 +159,9 @@ export function toggleDateInLog(log: string[], date: string): string[] {
 }
 
 export function addDays(dateString: string, delta: number): string {
-  const date = new Date(`${dateString}T00:00:00`);
+  const date = parseLocalDate(dateString.slice(0, 10));
   date.setDate(date.getDate() + delta);
-  return localDateString(date);
+  return toLocalDateString(date);
 }
 
 export function toDateString(
@@ -177,15 +175,15 @@ export function toDateString(
 }
 
 export function parseDateString(dateString: string): Date {
-  return new Date(`${dateString}T00:00:00`);
+  return parseLocalDate(dateString.slice(0, 10));
 }
 
 export function isDateInMonth(
   dateString: string,
-  referenceDate: string = todayDateString(),
+  referenceDate: string = todayLocal(),
 ): boolean {
-  const ref = parseDateString(referenceDate);
-  const date = parseDateString(dateString);
+  const ref = parseLocalDate(referenceDate.slice(0, 10));
+  const date = parseLocalDate(dateString.slice(0, 10));
   return (
     date.getFullYear() === ref.getFullYear() &&
     date.getMonth() === ref.getMonth()
@@ -193,9 +191,9 @@ export function isDateInMonth(
 }
 
 export function weeksInMonth(
-  referenceDate: string = todayDateString(),
+  referenceDate: string = todayLocal(),
 ): number {
-  const ref = parseDateString(referenceDate);
+  const ref = parseLocalDate(referenceDate.slice(0, 10));
   const daysInMonth = new Date(
     ref.getFullYear(),
     ref.getMonth() + 1,
@@ -206,7 +204,7 @@ export function weeksInMonth(
 
 export function countCompletionsInMonth(
   completionLog: string[],
-  referenceDate: string = todayDateString(),
+  referenceDate: string = todayLocal(),
 ): number {
   return completionLog.filter((date) => isDateInMonth(date, referenceDate))
     .length;

@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
-import { Pressable, Swipeable } from 'react-native-gesture-handler';
+import { StyleSheet, Text, TextInput, View, type TextInputInstance } from 'react-native';
+import { Pressable } from 'react-native-gesture-handler';
+import Swipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import type { GoalStatus } from '../types';
 import {
   DEFAULT_DRAGGABLE_ITEM_HEIGHT,
@@ -90,8 +91,8 @@ export function EditableOrderedRow({
   onDragEnd,
 }: Props) {
   const [editingTitle, setEditingTitle] = useState(false);
-  const inputRef = useRef<TextInput>(null);
-  const swipeableRef = useRef<Swipeable | null>(null);
+  const inputRef = useRef<TextInputInstance>(null);
+  const swipeableRef = useRef<SwipeableMethods>(null);
   const rowHeight = rowHeightFor(parentTitle, subtitle);
   const isDone = status === 'done';
 

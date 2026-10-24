@@ -298,10 +298,10 @@ export default function CommentThreadScreen({ navigation, route }: Props) {
               }
             }}
             ListHeaderComponent={
-              loadError ? <Text style={styles.error}>{loadError}</Text> : null
+              loadError ? <Text style={styles.error}>{loadError}</Text> : undefined
             }
             ListEmptyComponent={
-              loadError ? null : (
+              loadError ? undefined : (
                 <Text style={styles.empty}>Say something encouraging</Text>
               )
             }

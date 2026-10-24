@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
@@ -374,7 +375,7 @@ export default function GoalScreen({ navigation, route }: Props) {
   const [editTitle, setEditTitle] = useState('');
   const [saving, setSaving] = useState(false);
   const entryBusy = useRef(false);
-  const addInputRef = useRef<TextInput>(null);
+  const addInputRef = useRef<TextInputInstance>(null);
   const focusAddRef = useRef(false);
   const editRef = useRef<GoalEditFormHandle>(null);
   const allowLeaveRef = useRef(false);

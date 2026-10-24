@@ -32,7 +32,7 @@ module.exports = {
         projectId: 'ead878c6-d7a0-4b4c-8610-f7df6fc3f146',
       },
     },
-    runtimeVersion: 'exposdk:57.0.0',
+    runtimeVersion: 'exposdk:58.0.0',
     updates: {
       url: 'https://u.expo.dev/ead878c6-d7a0-4b4c-8610-f7df6fc3f146',
     },

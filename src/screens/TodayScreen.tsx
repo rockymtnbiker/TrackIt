@@ -14,6 +14,8 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewInstance,
+  type ViewInstance,
   type ListRenderItemInfo,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -1247,10 +1249,10 @@ export default function TodayScreen() {
   const selectedDateRef = useRef(selectedDate);
   selectedDateRef.current = selectedDate;
   const listRef = useRef<FlatList<string> | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
-  const scrollHostRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const scrollHostRef = useRef<ViewInstance>(null);
   const scrollOffset = useRef(0);
-  const rowRefs = useRef(new Map<string, View>());
+  const rowRefs = useRef(new Map<string, ViewInstance>());
   const scrolledFresh = useRef<string | null>(null);
   const handledFresh = useRef<string | null>(null);
   const highlightRef = useRef<string | null>(null);

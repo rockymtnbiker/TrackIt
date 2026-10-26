@@ -14,8 +14,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FormFieldRow, FormInlineInput } from '../components/FormFields';
+import { FeedbackSheet } from '../components/FeedbackSheet';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { SupportRequestSheet } from '../components/SupportRequestSheet';
+import { WhatsComing } from '../components/WhatsComing';
 import { useCommunity } from '../context/CommunityContext';
 import {
   cancelInvite,
@@ -84,6 +86,7 @@ export default function CommunityScreen({ navigation }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [latestRequest, setLatestRequest] = useState<SupportRequest | null>(null);
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -374,6 +377,17 @@ export default function CommunityScreen({ navigation }: Props) {
         ) : null}
           </>
         )}
+
+        <Text style={[styles.section, styles.comingSection]}>What's coming?</Text>
+        <WhatsComing />
+        <Pressable
+          onPress={() => setFeedbackOpen(true)}
+          style={({ pressed }) => [styles.feedbackLink, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Send feedback"
+        >
+          <Text style={styles.feedbackLinkText}>Send feedback</Text>
+        </Pressable>
       </ScrollView>
 
       <Modal
@@ -449,6 +463,7 @@ export default function CommunityScreen({ navigation }: Props) {
           }}
         />
       ) : null}
+      {feedbackOpen ? <FeedbackSheet onClose={() => setFeedbackOpen(false)} /> : null}
     </View>
   );
 }
@@ -514,6 +529,20 @@ const styles = StyleSheet.create({
     color: '#6B6B70',
     marginBottom: 8,
     marginLeft: 4,
+  },
+  comingSection: {
+    marginTop: 8,
+  },
+  feedbackLink: {
+    marginTop: 16,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  feedbackLinkText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#007aff',
   },
   card: {
     backgroundColor: '#fff',

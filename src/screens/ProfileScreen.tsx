@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { FeedbackSheet } from '../components/FeedbackSheet';
 import { TimePickerModal } from '../components/TimePickerModal';
 import { BADGES } from '../constants/badges';
 import { useAuth } from '../context/AuthContext';
@@ -124,6 +125,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const { user, signOut } = useAuth();
   const { settings, loading, updateSettings } = useSettings();
   const [signingOut, setSigningOut] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [savedName, setSavedName] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -262,6 +264,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const initial = displayName.trim().charAt(0).toUpperCase();
 
   return (
+    <>
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
@@ -393,6 +396,16 @@ export default function ProfileScreen({ navigation }: Props) {
       <Text style={styles.section}>Account</Text>
       <View style={styles.card}>
         <Pressable
+          onPress={() => setFeedbackOpen(true)}
+          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Send feedback"
+        >
+          <Text style={styles.rowLabel}>Send feedback</Text>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+        </Pressable>
+        <View style={styles.separator} />
+        <Pressable
           onPress={confirmLogout}
           disabled={signingOut}
           style={({ pressed }) => [styles.row, pressed && styles.pressed]}
@@ -429,6 +442,8 @@ export default function ProfileScreen({ navigation }: Props) {
         />
       ) : null}
     </ScrollView>
+    {feedbackOpen ? <FeedbackSheet onClose={() => setFeedbackOpen(false)} /> : null}
+    </>
   );
 }
 

@@ -2,6 +2,12 @@ import { supabase } from './supabase';
 
 type ProfileRow = {
   display_name: string | null;
+  onboarded_at?: string | null;
+};
+
+export type MyProfile = {
+  displayName: string;
+  onboardedAt: string | null;
 };
 
 async function requireUserId(): Promise<string> {
@@ -16,11 +22,11 @@ async function requireUserId(): Promise<string> {
   return userId;
 }
 
-export async function getDisplayName(): Promise<string> {
+export async function getMyProfile(): Promise<MyProfile> {
   const userId = await requireUserId();
   const { data, error } = await supabase
     .from('profiles')
-    .select('display_name')
+    .select('display_name, onboarded_at')
     .eq('id', userId)
     .maybeSingle();
 
@@ -28,7 +34,16 @@ export async function getDisplayName(): Promise<string> {
     throw error;
   }
 
-  return ((data as ProfileRow | null)?.display_name ?? '').trim();
+  const row = data as ProfileRow | null;
+  return {
+    displayName: (row?.display_name ?? '').trim(),
+    onboardedAt: row?.onboarded_at ?? null,
+  };
+}
+
+export async function getDisplayName(): Promise<string> {
+  const profile = await getMyProfile();
+  return profile.displayName;
 }
 
 export async function saveDisplayName(displayName: string): Promise<void> {
@@ -41,4 +56,21 @@ export async function saveDisplayName(displayName: string): Promise<void> {
   if (error) {
     throw error;
   }
+}
+
+/** Sets onboarded_at when it is still null. Returns false if this account was already onboarded. */
+export async function markOnboarded(): Promise<boolean> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ onboarded_at: new Date().toISOString() })
+    .eq('id', userId)
+    .is('onboarded_at', null)
+    .select('id');
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data) && data.length > 0;
 }

@@ -21,7 +21,10 @@ import { useSettings } from '../context/SettingsContext';
 import { createGoal, type GoalInput } from '../lib/goalTreeApi';
 import { isDaily, storedTimesPerDay, weeklyTarget } from '../lib/goalTree';
 import { WEEKDAY_INITIALS, WEEKDAY_NAMES } from '../lib/goalDetailText';
+import { markOnboarded } from '../lib/profileApi';
+import { captureStatusDates } from '../lib/statusDates';
 import { openDoToday } from '../lib/reminders';
+import { finishOnboarding } from '../navigation/onboardingHandoff';
 import type { WeekStart } from '../lib/settingsApi';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { Goal, RepeatPeriod } from '../types/goal';
@@ -230,6 +233,12 @@ function fieldsFor(draft: Draft, weekStartsOn: WeekStart): GoalInput {
     targetAmount = tracked ? parsed : clampCount(draft.times, 60);
   }
 
+  const dates = captureStatusDates(
+    'active',
+    { actual_start_date: null, actual_end_date: null },
+    todayLocal(),
+  );
+
   return {
     title: draft.title.trim(),
     parentId: null,
@@ -242,6 +251,9 @@ function fieldsFor(draft: Draft, weekStartsOn: WeekStart): GoalInput {
     plannedDays,
     timesPerDay,
     targetEndDate: draft.deadline.trim() || null,
+    status: 'active',
+    actualStartDate: dates.actual_start_date,
+    actualEndDate: dates.actual_end_date,
   };
 }
 
@@ -337,6 +349,13 @@ export default function GoalSetupScreen({ navigation }: Props) {
     setCreateError(null);
     try {
       const created = await createGoal(fieldsFor(draft, settings.weekStart));
+      const routeNames = navigation.getState()?.routeNames as readonly string[] | undefined;
+      if (routeNames?.includes('FirstGoal')) {
+        await markOnboarded();
+        setCreating(false);
+        finishOnboarding(created.id);
+        return;
+      }
       setCreating(false);
       navigation.popToTop();
       openDoToday(created.id);

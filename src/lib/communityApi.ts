@@ -3,6 +3,7 @@ import type { Goal, GoalEntry, GoalStatus, RepeatPeriod } from '../types/goal';
 import { localCalendarDay, normalizeDateOnly } from './localDate';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
 import { buildChildrenMap, storedTimesPerDay } from './goalTree';
+import { awardBadges } from './badgeCelebration';
 import { supabase } from './supabase';
 
 export type SharedGoals = {
@@ -272,6 +273,9 @@ export async function respondToInvite(
   const { data, error } = await supabase.rpc('respond_to_invite', { p_id: id, p_accept: accept });
   if (error) {
     throw error;
+  }
+  if (accept) {
+    awardBadges();
   }
   return asConnection(data);
 }

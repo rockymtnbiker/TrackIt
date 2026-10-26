@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BadgeCelebrationHost, BadgeStartup } from './src/components/BadgeCelebration';
 import { ReminderSync } from './src/components/ReminderSync';
 import { AuthProvider } from './src/context/AuthContext';
 import { SettingsProvider } from './src/context/SettingsContext';
@@ -18,6 +19,8 @@ export default function App() {
             <NavigationContainer ref={navigationRef}>
               <RootNavigator />
               <ReminderSync />
+              <BadgeStartup />
+              <BadgeCelebrationHost />
               <StatusBar style="auto" />
             </NavigationContainer>
           </SettingsProvider>

@@ -1,5 +1,6 @@
 import { normalizeDateOnly } from './localDate';
 import { getActiveSettings } from './settingsApi';
+import { awardBadges } from './badgeCelebration';
 import { supabase } from './supabase';
 import { startOfWeek } from './week';
 
@@ -89,6 +90,28 @@ async function requireUserId(): Promise<string> {
   return userId;
 }
 
+/** Week starts the user has reviewed, aligned to the current week start. */
+export async function getReviewWeeks(): Promise<string[]> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('week_start')
+    .eq('user_id', userId);
+
+  if (error) {
+    throw error;
+  }
+
+  const weeks: string[] = [];
+  for (const row of (data as { week_start: string }[] | null) ?? []) {
+    const day = normalizeDateOnly(row.week_start);
+    if (day) {
+      weeks.push(startOfWeek(day, getActiveSettings().weekStart));
+    }
+  }
+  return weeks;
+}
+
 export async function getReview(weekStart: string): Promise<WeekReview | null> {
   const userId = await requireUserId();
   const week = weekStartKey(weekStart);
@@ -150,5 +173,6 @@ export async function upsertReview(input: WeekReviewInput): Promise<WeekReview> 
   if (error) {
     throw error;
   }
+  awardBadges();
   return mapRow(data as WeekReviewRow);
 }

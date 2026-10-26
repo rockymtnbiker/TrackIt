@@ -1,7 +1,8 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Constants from 'expo-constants';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,9 +16,12 @@ import {
   View,
 } from 'react-native';
 import { TimePickerModal } from '../components/TimePickerModal';
+import { BADGES } from '../constants/badges';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
+import { listEarnedBadges, type EarnedBadge } from '../lib/badges';
 import { clockFromDate, dateAtClock } from '../lib/clock';
+import { localCalendarDay } from '../lib/localDate';
 import { getDisplayName, saveDisplayName } from '../lib/profileApi';
 import {
   DEFAULT_CHECKIN,
@@ -26,6 +30,7 @@ import {
 } from '../lib/reminders';
 import type { WeekStart } from '../lib/settingsApi';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
+import { formatDateMDY } from '../utils/date';
 import { formatTime } from '../utils/formatTime';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'Profile'>;
@@ -122,6 +127,8 @@ export default function ProfileScreen({ navigation }: Props) {
   const [savingName, setSavingName] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [checkinPicker, setCheckinPicker] = useState(false);
+  const [earnedBadges, setEarnedBadges] = useState<EarnedBadge[]>([]);
+  const [badgesLoaded, setBadgesLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +152,31 @@ export default function ProfileScreen({ navigation }: Props) {
       cancelled = true;
     };
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void listEarnedBadges()
+        .then((rows) => {
+          if (!cancelled) {
+            setEarnedBadges(rows);
+          }
+        })
+        .catch((error) => {
+          console.warn('Failed to load badges', error);
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setBadgesLoaded(true);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
+
+  const earnedByKey = new Map(earnedBadges.map((badge) => [badge.badgeKey, badge]));
 
   const persistDisplayName = async (value: string) => {
     const trimmed = value.trim();
@@ -275,6 +307,40 @@ export default function ProfileScreen({ navigation }: Props) {
             {user?.email ?? '—'}
           </Text>
         </View>
+      </View>
+
+      <Text style={styles.section}>Badges</Text>
+      <View style={styles.card}>
+        {badgesLoaded ? (
+          <View style={styles.badgeGrid}>
+            {BADGES.map((badge) => {
+              const earned = earnedByKey.get(badge.key);
+              const earnedDay = earned ? localCalendarDay(earned.earnedAt) : '';
+              const earnedLabel = earnedDay ? formatDateMDY(earnedDay) : '';
+              return (
+                <View
+                  key={badge.key}
+                  style={styles.badgeCell}
+                  accessibilityLabel={
+                    earned
+                      ? `${badge.name}, earned ${earnedLabel}`
+                      : `${badge.name}, ${badge.hint}`
+                  }
+                >
+                  <MaterialCommunityIcons
+                    name={badge.icon}
+                    size={32}
+                    color={earned ? '#007aff' : '#c7c7cc'}
+                  />
+                  <Text style={[styles.badgeName, !earned && styles.badgeMuted]}>{badge.name}</Text>
+                  <Text style={styles.badgeDetail}>{earned ? earnedLabel : badge.hint}</Text>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <ActivityIndicator color="#007aff" style={styles.badgeLoading} />
+        )}
       </View>
 
       <Text style={styles.section}>Help</Text>
@@ -460,6 +526,35 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginBottom: 24,
     overflow: 'hidden',
+  },
+  badgeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  badgeCell: {
+    width: '50%',
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    gap: 4,
+  },
+  badgeName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111',
+    textAlign: 'center',
+  },
+  badgeMuted: {
+    color: '#8e8e93',
+  },
+  badgeDetail: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#8e8e93',
+    textAlign: 'center',
+  },
+  badgeLoading: {
+    margin: 16,
   },
   row: {
     minHeight: 48,

@@ -18,6 +18,7 @@ import { normalizeClock } from './clock';
 import { goalStartDate, isRepeating, storedTimesPerDay } from './goalTree';
 import { getActiveSettings } from './settingsApi';
 import { captureStatusDates } from './statusDates';
+import { awardBadges } from './badgeCelebration';
 import { supabase } from './supabase';
 import { endOfWeek, startOfWeek } from './week';
 
@@ -712,6 +713,9 @@ export async function setGoalStatus(
   }
 
   refreshReminders();
+  if (status === 'done' && existing.status !== 'done') {
+    awardBadges();
+  }
   return mapRowToNode(data as GoalRow);
 }
 
@@ -868,6 +872,7 @@ export async function insertEntry(
     ? await activatePendingOnLog(goalId, entry.entryDate, userId)
     : [];
   refreshReminders();
+  awardBadges();
   return { entry, goals };
 }
 

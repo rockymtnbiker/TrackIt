@@ -137,7 +137,8 @@ export function getWeeklyItems(
 }
 
 const WEEK_STREAK_LOOKBACK = 52;
-const WEEK_STREAK_DONE = 0.8;
+/** A week counts toward the Review week-streak tile at this done percent. */
+export const WEEK_STREAK_DONE = 0.8;
 
 /**
  * Consecutive weeks at 80%+ done, walking back from last week.

@@ -4,14 +4,17 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardSafe } from '../components/KeyboardSafe';
 import { useSettings } from '../context/SettingsContext';
 import type { WeekStart } from '../lib/settingsApi';
 import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
@@ -42,6 +45,7 @@ import {
   type WeeklyReview,
 } from '../lib/weeklyReview';
 import { getAllGoals, getEntries } from '../lib/goalTreeApi';
+import { getReview, upsertReview, type WeekReview } from '../lib/reviewApi';
 import type { DashboardStackParamList, RootTabParamList } from '../navigation/TabNavigator';
 import type { GoalEntry, Goal } from '../types/goal';
 import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
@@ -595,6 +599,138 @@ function missedThisWeek(
   return missed;
 }
 
+const RATING_CHOICES = [1, 2, 3, 4, 5] as const;
+
+function ReviewSheet({
+  initial,
+  onCancel,
+  onSave,
+}: {
+  initial: { rating: number | null; win: string; changeNext: string };
+  onCancel: () => void;
+  onSave: (draft: { rating: number; win: string; changeNext: string }) => Promise<void>;
+}) {
+  const insets = useSafeAreaInsets();
+  const [rating, setRating] = useState<number | null>(initial.rating);
+  const [win, setWin] = useState(initial.win);
+  const [changeNext, setChangeNext] = useState(initial.changeNext);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = () => {
+    if (rating == null || saving) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    void onSave({ rating, win, changeNext })
+      .catch((saveError) => {
+        setError(saveError instanceof Error ? saveError.message : 'Could not save the review.');
+        setSaving(false);
+      });
+  };
+
+  return (
+    <Modal visible animationType="slide" transparent onRequestClose={onCancel}>
+      <KeyboardSafe style={styles.sheetOverlay} keyboardVerticalOffset={0}>
+        <Pressable
+          style={styles.sheetDismiss}
+          onPress={saving ? undefined : onCancel}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel review"
+        />
+        <View style={[styles.sheet, { paddingBottom: 16 + insets.bottom }]}>
+          <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
+            <Text style={styles.sheetTitle}>How did this week go?</Text>
+            <View style={styles.ratingRow}>
+              {RATING_CHOICES.map((choice) => {
+                const selected = rating === choice;
+                return (
+                  <Pressable
+                    key={choice}
+                    onPress={() => setRating(choice)}
+                    disabled={saving}
+                    style={({ pressed }) => [
+                      styles.ratingChoice,
+                      selected && styles.ratingChoiceSelected,
+                      pressed && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={
+                      choice === 1 ? 'Rate 1, rough' : choice === 5 ? 'Rate 5, great' : `Rate ${choice}`
+                    }
+                  >
+                    <Text style={[styles.ratingChoiceText, selected && styles.ratingChoiceTextSelected]}>
+                      {choice}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.ratingLabels}>
+              <Text style={styles.ratingLabel}>Rough</Text>
+              <Text style={styles.ratingLabel}>Great</Text>
+            </View>
+            <Text style={styles.sheetFieldLabel}>One win</Text>
+            <TextInput
+              style={styles.sheetInput}
+              value={win}
+              onChangeText={setWin}
+              placeholder="Optional"
+              placeholderTextColor="#aaa"
+              maxLength={280}
+              editable={!saving}
+              returnKeyType="done"
+            />
+            <Text style={styles.sheetFieldLabel}>One thing to change next week</Text>
+            <TextInput
+              style={styles.sheetInput}
+              value={changeNext}
+              onChangeText={setChangeNext}
+              placeholder="Optional"
+              placeholderTextColor="#aaa"
+              maxLength={280}
+              editable={!saving}
+              returnKeyType="done"
+            />
+            {error ? <Text style={styles.sheetError}>{error}</Text> : null}
+            <View style={styles.sheetActions}>
+              <Pressable
+                onPress={onCancel}
+                disabled={saving}
+                style={({ pressed }) => [styles.sheetCancel, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+              >
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={save}
+                disabled={rating == null || saving}
+                style={({ pressed }) => [
+                  styles.sheetDone,
+                  (rating == null || saving) && styles.sheetDoneDisabled,
+                  pressed && rating != null && styles.pressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: rating == null || saving }}
+                accessibilityLabel="Done"
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.sheetDoneText}>Done</Text>
+                )}
+              </Pressable>
+            </View>
+          </ScrollView>
+        </View>
+      </KeyboardSafe>
+    </Modal>
+  );
+}
+
 export default function DashboardScreen({ navigation }: Props) {
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
@@ -608,6 +744,11 @@ export default function DashboardScreen({ navigation }: Props) {
   const [viewedWeek, setViewedWeek] = useState(() =>
     defaultReviewWeek(todayLocal(), weekStartsOn),
   );
+  const [weekReview, setWeekReview] = useState<{
+    weekStart: string;
+    review: WeekReview | null;
+  } | null>(null);
+  const [reviewSheetOpen, setReviewSheetOpen] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setLoadError(null);
@@ -712,6 +853,28 @@ export default function DashboardScreen({ navigation }: Props) {
   const canGoPrevious = weekStart > earliestWeek;
   const canGoNext = weekStart < currentWeek;
   const weekRange = `${formatShortDate(weekStart)} – ${formatShortDate(endOfWeek(weekStart, weekStartsOn))}`;
+  const savedReview = weekReview?.weekStart === weekStart ? weekReview.review : undefined;
+  const canCompleteReview = weekStart === currentWeek || weekStart === addDays(currentWeek, -7);
+
+  useEffect(() => {
+    setReviewSheetOpen(false);
+    let cancelled = false;
+    void getReview(weekStart)
+      .then((reviewRow) => {
+        if (!cancelled) {
+          setWeekReview({ weekStart, review: reviewRow });
+        }
+      })
+      .catch((error) => {
+        console.warn('Failed to load weekly review', error);
+        if (!cancelled) {
+          setWeekReview({ weekStart, review: null });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [weekStart]);
 
   const appliedWeekStart = useRef(weekStartsOn);
   useEffect(() => {
@@ -1087,6 +1250,34 @@ export default function DashboardScreen({ navigation }: Props) {
                 )}
               </View>
             ) : null}
+            {savedReview ? (
+              <Pressable
+                onPress={() => setReviewSheetOpen(true)}
+                style={({ pressed }) => [styles.weeklyCard, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Reviewed, ${savedReview.rating} of 5. Tap to edit.`}
+              >
+                <View style={styles.reviewedTitleRow}>
+                  <Text style={styles.reviewedTitle}>✓ Reviewed</Text>
+                  <Text style={styles.reviewedRating}>{savedReview.rating}/5</Text>
+                </View>
+                {savedReview.win ? (
+                  <Text style={styles.reviewedNote}>{savedReview.win}</Text>
+                ) : null}
+                {savedReview.changeNext ? (
+                  <Text style={styles.reviewedNote}>{savedReview.changeNext}</Text>
+                ) : null}
+              </Pressable>
+            ) : savedReview === null && canCompleteReview ? (
+              <Pressable
+                onPress={() => setReviewSheetOpen(true)}
+                style={({ pressed }) => [styles.weeklyCard, styles.reviewButton, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Complete my review"
+              >
+                <Text style={styles.reviewButtonText}>Complete my review</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={() =>
                 navigation.getParent<NavigationProp<RootTabParamList>>()?.navigate('Goals')
@@ -1098,6 +1289,30 @@ export default function DashboardScreen({ navigation }: Props) {
               <Text style={styles.planButtonText}>Plan next week →</Text>
             </Pressable>
       </ScrollView>
+      {reviewSheetOpen ? (
+        <ReviewSheet
+          initial={{
+            rating:
+              savedReview != null && savedReview.rating >= 1 && savedReview.rating <= 5
+                ? savedReview.rating
+                : null,
+            win: savedReview?.win ?? '',
+            changeNext: savedReview?.changeNext ?? '',
+          }}
+          onCancel={() => setReviewSheetOpen(false)}
+          onSave={async (draft) => {
+            const saved = await upsertReview({
+              weekStart,
+              rating: draft.rating,
+              win: draft.win,
+              changeNext: draft.changeNext,
+              donePct: Math.round(review.donePct * 100),
+            });
+            setWeekReview({ weekStart, review: saved });
+            setReviewSheetOpen(false);
+          }}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1584,5 +1799,156 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 14,
     color: '#aaa',
+  },
+  reviewButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  reviewButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#007aff',
+  },
+  reviewedTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  reviewedTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#111',
+  },
+  reviewedRating: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#007aff',
+  },
+  reviewedNote: {
+    fontSize: 15,
+    lineHeight: 20,
+    color: '#666',
+    marginTop: 6,
+  },
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  sheetDismiss: {
+    flex: 1,
+  },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    maxHeight: '90%',
+  },
+  sheetTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#111',
+    marginBottom: 12,
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  ratingChoice: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f2f2f7',
+    borderWidth: 1,
+    borderColor: '#e5e5ea',
+  },
+  ratingChoiceSelected: {
+    backgroundColor: '#007aff',
+    borderColor: '#007aff',
+  },
+  ratingChoiceText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#111',
+  },
+  ratingChoiceTextSelected: {
+    color: '#fff',
+  },
+  ratingLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+    marginBottom: 16,
+  },
+  ratingLabel: {
+    fontSize: 13,
+    color: '#8e8e93',
+  },
+  sheetFieldLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 6,
+  },
+  sheetInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 17,
+    color: '#111',
+    backgroundColor: '#fff',
+    minHeight: 44,
+    marginBottom: 14,
+  },
+  sheetError: {
+    fontSize: 14,
+    color: '#c62828',
+    marginBottom: 8,
+  },
+  sheetActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  sheetCancel: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#f0f0f0',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  sheetCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#555',
+  },
+  sheetDone: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#007aff',
+    minHeight: 44,
+    minWidth: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetDoneDisabled: {
+    opacity: 0.4,
+  },
+  sheetDoneText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

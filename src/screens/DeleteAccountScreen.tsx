@@ -1,4 +1,3 @@
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,9 +10,6 @@ import {
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
-
-type Props = NativeStackScreenProps<GoalsStackParamList, 'DeleteAccount'>;
 
 const CONFIRM_TEXT = 'DELETE';
 
@@ -37,7 +33,7 @@ async function invokeErrorMessage(error: unknown): Promise<string> {
   return 'Could not delete the account.';
 }
 
-export default function DeleteAccountScreen(_props: Props) {
+export default function DeleteAccountScreen() {
   const { signOut } = useAuth();
   const [phrase, setPhrase] = useState('');
   const [deleting, setDeleting] = useState(false);

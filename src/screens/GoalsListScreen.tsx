@@ -155,17 +155,6 @@ export default function GoalsListScreen({ navigation }: Props) {
       >
         <View style={styles.headerRow}>
           <Pressable
-            onPress={() => navigation.navigate('Profile')}
-            style={({ pressed }) => [
-              styles.addButton,
-              pressed && styles.pressed,
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Profile"
-          >
-            <Ionicons name="person-circle" size={28} color="#111" />
-          </Pressable>
-          <Pressable
             onPress={openCreate}
             style={({ pressed }) => [
               styles.addButton,
@@ -256,7 +245,7 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     marginBottom: 10,
   },
   addButton: {

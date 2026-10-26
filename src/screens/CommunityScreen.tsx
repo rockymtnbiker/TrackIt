@@ -15,19 +15,23 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { FormFieldRow, FormInlineInput } from '../components/FormFields';
 import { KeyboardSafe } from '../components/KeyboardSafe';
+import { SupportRequestSheet } from '../components/SupportRequestSheet';
 import { useCommunity } from '../context/CommunityContext';
 import {
   cancelInvite,
   respondToInvite,
   sendPartnerInvite,
 } from '../lib/communityApi';
+import { localCalendarDay } from '../lib/localDate';
+import { getLatestSupportRequest, type SupportRequest } from '../lib/supportApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
 import type { Connection } from '../types/community';
+import { formatDate } from '../utils/date';
 
 type Props = NativeStackScreenProps<CommunityStackParamList, 'CommunityMain'>;
 
 const INVITE_SENT =
-  "Invite sent. If they have a TrackIt account, they'll see it in Community.";
+  "Invite sent. If they have a TrackIt account, they'll see it in Connect.";
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -79,6 +83,8 @@ export default function CommunityScreen({ navigation }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [latestRequest, setLatestRequest] = useState<SupportRequest | null>(null);
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -96,10 +102,19 @@ export default function CommunityScreen({ navigation }: Props) {
     }
   }, [refreshConnections]);
 
+  const loadLatestRequest = useCallback(async () => {
+    try {
+      setLatestRequest(await getLatestSupportRequest());
+    } catch {
+      // Partners still load if this read fails.
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void load();
-    }, [load]),
+      void loadLatestRequest();
+    }, [load, loadLatestRequest]),
   );
 
   const visible = connections.filter((connection) => !hiddenFromMe(connection));
@@ -162,13 +177,9 @@ export default function CommunityScreen({ navigation }: Props) {
     }
   };
 
-  if (loading && connections.length === 0) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator color="#007aff" />
-      </View>
-    );
-  }
+  const requestSentDay = latestRequest
+    ? localCalendarDay(latestRequest.createdAt)
+    : '';
 
   return (
     <View style={styles.screen}>
@@ -181,11 +192,49 @@ export default function CommunityScreen({ navigation }: Props) {
             onRefresh={() => {
               setRefreshing(true);
               void load();
+              void loadLatestRequest();
             }}
             tintColor="#007aff"
           />
         }
       >
+        <Pressable
+          onPress={() => navigation.navigate('Learn')}
+          style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Learn. Videos and quick reads on setting and reaching goals"
+        >
+          <View style={styles.actionText}>
+            <Text style={styles.actionTitle}>Learn</Text>
+            <Text style={styles.actionBody}>
+              Videos and quick reads on setting and reaching goals
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+        </Pressable>
+
+        <Pressable
+          onPress={() => setRequestOpen(true)}
+          style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Talk to someone. Get help from a real person, from setting up goals to the bigger stuff."
+        >
+          <View style={styles.actionText}>
+            <Text style={styles.actionTitle}>Talk to someone</Text>
+            <Text style={styles.actionBody}>
+              Get help from a real person, from setting up goals to the bigger stuff.
+            </Text>
+            {requestSentDay ? (
+              <Text style={styles.requestSent}>Request sent · {formatDate(requestSentDay)}</Text>
+            ) : null}
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+        </Pressable>
+
+        {loading && connections.length === 0 ? (
+          <ActivityIndicator color="#007aff" style={styles.partnersLoading} />
+        ) : (
+          <>
         <Pressable
           onPress={() => setInviteOpen(true)}
           style={({ pressed }) => [styles.inviteButton, pressed && styles.pressed]}
@@ -323,6 +372,8 @@ export default function CommunityScreen({ navigation }: Props) {
             <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
           </Pressable>
         ) : null}
+          </>
+        )}
       </ScrollView>
 
       <Modal
@@ -388,6 +439,16 @@ export default function CommunityScreen({ navigation }: Props) {
           </ScrollView>
         </KeyboardSafe>
       </Modal>
+
+      {requestOpen ? (
+        <SupportRequestSheet
+          onClose={() => setRequestOpen(false)}
+          onSent={(request) => {
+            setLatestRequest(request);
+            setRequestOpen(false);
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -401,11 +462,37 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
-  loading: {
-    flex: 1,
+  partnersLoading: {
+    marginTop: 12,
+  },
+  actionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 12,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f2f2f7',
+    gap: 12,
+  },
+  actionText: {
+    flex: 1,
+    gap: 4,
+  },
+  actionTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#111',
+  },
+  actionBody: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: '#6B6B70',
+  },
+  requestSent: {
+    fontSize: 13,
+    color: '#6B6B70',
+    marginTop: 2,
   },
   inviteButton: {
     backgroundColor: '#fff',

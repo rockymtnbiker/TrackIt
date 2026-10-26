@@ -1,6 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -29,11 +28,14 @@ import {
   NOTIFICATION_DENIED_MESSAGE,
 } from '../lib/reminders';
 import type { WeekStart } from '../lib/settingsApi';
-import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import { formatDateMDY } from '../utils/date';
 import { formatTime } from '../utils/formatTime';
 
-type Props = NativeStackScreenProps<GoalsStackParamList, 'Profile'>;
+type Props = {
+  navigation: {
+    navigate: (screen: 'DeleteAccount') => void;
+  };
+};
 
 const WEEK_OPTIONS: { value: WeekStart; label: string }[] = [
   { value: 0, label: 'Sunday' },
@@ -341,29 +343,6 @@ export default function ProfileScreen({ navigation }: Props) {
         ) : (
           <ActivityIndicator color="#007aff" style={styles.badgeLoading} />
         )}
-      </View>
-
-      <Text style={styles.section}>Help</Text>
-      <View style={styles.card}>
-        <Pressable
-          onPress={() => navigation.navigate('HelpSettingGoals')}
-          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Help setting goals"
-        >
-          <Text style={styles.rowLabel}>Help setting goals</Text>
-          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-        </Pressable>
-        <View style={styles.separator} />
-        <Pressable
-          onPress={() => navigation.navigate('HelpReachingGoals')}
-          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Help reaching goals"
-        >
-          <Text style={styles.rowLabel}>Help reaching goals</Text>
-          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-        </Pressable>
       </View>
 
       <Text style={styles.section}>Subscription</Text>

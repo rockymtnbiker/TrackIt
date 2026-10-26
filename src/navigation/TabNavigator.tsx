@@ -187,16 +187,16 @@ function TabScreens() {
         name="Community"
         component={CommunityStackNavigator}
         options={{
-          tabBarLabel: 'Community',
+          tabBarLabel: 'Connect',
           tabBarAccessibilityLabel:
             incomingCount > 0
-              ? `Community, ${incomingCount} incoming invites`
-              : 'Community',
+              ? `Connect, ${incomingCount} incoming invites`
+              : 'Connect',
           tabBarBadge:
             incomingCount > 0 ? () => <InviteBadge count={incomingCount} /> : undefined,
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ focused, color }) => (
             <MaterialCommunityIcons
-              name="account-group"
+              name={focused ? 'handshake' : 'handshake-outline'}
               size={24}
               color={color}
               style={styles.tabIcon}

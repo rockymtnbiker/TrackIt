@@ -1,6 +1,17 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+export type LearnVideo = {
+  id: string;
+  title: string;
+  /** Real video URL. Null until the video is ready. */
+  url: string | null;
+};
 
-const TIPS: { title: string; body: string }[] = [
+export const LEARN_VIDEOS: LearnVideo[] = [
+  { id: 'welcome', title: 'Welcome', url: null },
+  { id: 'setting-a-goal', title: 'Setting a goal', url: null },
+  { id: 'weekly-review', title: 'Your weekly review', url: null },
+];
+
+export const QUICK_READS: { title: string; body: string }[] = [
   {
     title: 'Write it down.',
     body: 'A goal you write down is a goal you can see, plan and check.',
@@ -38,51 +49,3 @@ const TIPS: { title: string; body: string }[] = [
     body: 'Sharing a goal with someone makes you far more likely to follow through.',
   },
 ];
-
-export default function HelpSettingGoalsScreen() {
-  return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      {TIPS.map((tip) => (
-        <View key={tip.title} style={styles.card}>
-          <Text style={styles.title}>{tip.title}</Text>
-          <Text style={styles.body}>{tip.body}</Text>
-        </View>
-      ))}
-      <Text style={styles.footer}>Videos coming soon.</Text>
-    </ScrollView>
-  );
-}
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#f2f2f7',
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-    gap: 6,
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111',
-  },
-  body: {
-    fontSize: 15,
-    lineHeight: 21,
-    color: '#6B6B70',
-  },
-  footer: {
-    fontSize: 13,
-    color: '#8e8e93',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-});

@@ -42,6 +42,7 @@ import {
   buildChildrenMap,
   isDaily,
   paceInfo,
+  periodTarget,
   periodTotal,
   rollupTotal,
   weekTargetFor,
@@ -531,6 +532,9 @@ export function GoalReadout({
       ? periodTotal(node, entries, today, settings.weekStart)
       : (rollupTotal(node, nodes, entries) ?? 0)
     : null;
+  const amountTarget = repeatOn
+    ? periodTarget(node, today, settings.weekStart)
+    : node.targetAmount;
   const pace =
     displayUnit && !repeatOn ? paceInfo(node, total ?? 0, today) : null;
 
@@ -539,7 +543,7 @@ export function GoalReadout({
       {displayUnit ? (
         <View style={styles.progressCard}>
           <Text style={styles.progress}>
-            {total ?? 0} / {node.targetAmount ?? '—'} {displayUnit}
+            {total ?? 0} / {amountTarget ?? '—'} {displayUnit}
             {repeatOn ? ` this ${periodWord(node.repeatPeriod)}` : ''}
           </Text>
           <View style={styles.barTrack}>
@@ -551,8 +555,8 @@ export function GoalReadout({
                     0,
                     Math.min(
                       100,
-                      node.targetAmount
-                        ? ((total ?? 0) / node.targetAmount) * 100
+                      amountTarget
+                        ? ((total ?? 0) / amountTarget) * 100
                         : 0,
                     ),
                   )}%`,
@@ -805,6 +809,8 @@ export default function StepDetailScreen({ navigation, route }: Props) {
             targetAmount: updated.targetAmount,
             repeatPeriod: updated.repeatPeriod,
             plannedDays: updated.plannedDays,
+            timesPerDay: updated.timesPerDay,
+            targetHistory: updated.targetHistory,
             actualStartDate: updated.actualStartDate,
             actualEndDate: updated.actualEndDate,
             targetStartDate: updated.targetStartDate,

@@ -1,6 +1,6 @@
 import type { Goal, GoalEntry } from '../types/goal';
 import { normalizeDateOnly, parseLocalDate } from './localDate';
-import { goalStartDate, isRepeating, periodTotal } from './goalTree';
+import { goalStartDate, isPeriodTargetMet, isRepeating, periodTotal } from './goalTree';
 import type { WeekStart } from './settingsApi';
 
 export { periodBounds, weeklyTarget } from './goalTree';
@@ -73,15 +73,17 @@ export function periodTotalAsOf(
   return periodTotal(node, entriesOnOrBefore(entries, asOf), asOf, weekStartsOn);
 }
 
-/** False when the step has no target amount. Uses the as-of-D period total. */
+/** False when the period has no target. Uses the as-of-D period total. */
 export function isPeriodTargetMetAsOf(
   node: Goal,
   entries: GoalEntry[],
   asOf: string,
   weekStartsOn: WeekStart,
 ): boolean {
-  if (node.targetAmount == null) {
-    return false;
-  }
-  return periodTotalAsOf(node, entries, asOf, weekStartsOn) >= node.targetAmount;
+  return isPeriodTargetMet(
+    node,
+    entriesOnOrBefore(entries, asOf),
+    asOf,
+    weekStartsOn,
+  );
 }

@@ -14,6 +14,7 @@ import {
   isRepeating,
   isTracked,
   periodTotal,
+  targetFor,
   weekTargetFor,
 } from './goalTree';
 
@@ -115,6 +116,14 @@ function weeklyAnalysis(
   weekStartsOn: WeekStart,
 ): GoalAnalysis | null {
   const weekStart = startOfWeek(today, weekStartsOn);
+  const effective = targetFor(node, weekStart, endOfWeek(weekStart, weekStartsOn));
+  const view: Goal = {
+    ...node,
+    targetAmount: effective.targetAmount,
+    repeatPeriod: effective.repeatPeriod,
+    plannedDays: effective.plannedDays,
+    timesPerDay: effective.timesPerDay,
+  };
   const { target, availableDays } = weekTargetFor(node, weekStart, weekStartsOn);
   if (target == null || target <= 0) {
     return null;
@@ -122,7 +131,7 @@ function weeklyAnalysis(
 
   const total = periodTotalAsOf(node, entries, today, weekStartsOn);
   const stats = progressDetail(
-    node,
+    view,
     total,
     target,
     sixWeekAverage(node, entries, today, weekStartsOn),
@@ -140,7 +149,7 @@ function weeklyAnalysis(
 
   const remaining = target - total;
   const daysLeft = availableDays.filter((day) => dateKey(day) >= today).length;
-  const cantFinish = isDaily(node) && !isTracked(node) && remaining > daysLeft;
+  const cantFinish = isDaily(view) && !isTracked(node) && remaining > daysLeft;
   if (cantFinish) {
     return { headline: "Can't finish this week", detail: stats, tone: 'warn' };
   }
@@ -239,7 +248,15 @@ export function goalStreaks(
 
   const day = today.slice(0, 10);
   const start = goalStartDate(node);
-  if (isDaily(node)) {
+  const weekStart = startOfWeek(day, weekStartsOn);
+  const effective = targetFor(node, weekStart, endOfWeek(weekStart, weekStartsOn));
+  const dailyNow = isDaily({
+    ...node,
+    targetAmount: effective.targetAmount,
+    repeatPeriod: effective.repeatPeriod,
+    plannedDays: effective.plannedDays,
+  });
+  if (dailyNow) {
     const dates = completionDates(node, entriesOnOrBefore(entries, day));
     return {
       current: calculateStreak(dates, day, start),

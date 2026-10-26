@@ -58,6 +58,7 @@ import {
   isRepeating,
   isTracked,
   latestDayEntry,
+  periodTarget,
   rollupTotal,
   timesPerDay,
   weekTargetFor,
@@ -1476,13 +1477,16 @@ function LeafAmountBar({
   today: string;
 }) {
   const { settings } = useSettings();
-  if (!isTracked(node) || node.targetAmount == null || node.targetAmount <= 0) {
+  const amountTarget = isRepeating(node)
+    ? periodTarget(node, today, settings.weekStart)
+    : node.targetAmount;
+  if (!isTracked(node) || amountTarget == null || amountTarget <= 0) {
     return null;
   }
   const total = isRepeating(node)
     ? periodTotalAsOf(node, entries, today, settings.weekStart)
     : (rollupTotal(node, nodes, entries) ?? 0);
-  const ratio = Math.max(0, Math.min(1, total / node.targetAmount));
+  const ratio = Math.max(0, Math.min(1, total / amountTarget));
   return (
     <View style={styles.miniTrack}>
       <View style={[styles.miniFill, { width: `${ratio * 100}%` }]} />

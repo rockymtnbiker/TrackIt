@@ -2,6 +2,7 @@ import type {
   GoalEntry,
   Goal,
   GoalStatus,
+  GoalTarget,
   RepeatPeriod,
 } from '../types/goal';
 import {
@@ -11,11 +12,14 @@ import {
   todayLocal,
   toLocalDateString,
 } from './localDate';
+import { toDateString } from '../utils/date';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
 import { normalizeClock } from './clock';
-import { isRepeating, storedTimesPerDay } from './goalTree';
+import { goalStartDate, isRepeating, storedTimesPerDay } from './goalTree';
+import { getActiveSettings } from './settingsApi';
 import { captureStatusDates } from './statusDates';
 import { supabase } from './supabase';
+import { endOfWeek, startOfWeek } from './week';
 
 type GoalRow = {
   id: string;
@@ -153,6 +157,107 @@ function refreshReminders(): void {
 }
 
 const ENTRY_COLUMNS = 'id, goal_id, entry_date, value, created_at';
+const GOAL_TARGETS_TABLE = 'goal_targets';
+const TARGET_COLUMNS =
+  'id, goal_id, user_id, effective_from, target_amount, repeat_period, planned_days, times_per_day, created_at';
+
+type GoalTargetRow = {
+  id: string;
+  goal_id: string;
+  user_id: string;
+  effective_from: string;
+  target_amount: number | string | null;
+  repeat_period: string | null;
+  planned_days: number[] | null;
+  times_per_day: number | string | null;
+  created_at: string | null;
+};
+
+function mapTargetRow(row: GoalTargetRow): GoalTarget {
+  return {
+    id: row.id,
+    goalId: row.goal_id,
+    userId: row.user_id,
+    effectiveFrom: normalizeDateOnly(row.effective_from) ?? row.effective_from.slice(0, 10),
+    targetAmount: amountToNumber(row.target_amount) ?? null,
+    repeatPeriod: mapRepeatPeriod(row.repeat_period),
+    plannedDays: row.planned_days,
+    timesPerDay: storedTimesPerDay(amountToNumber(row.times_per_day) ?? null),
+    createdAt: row.created_at ?? '',
+  };
+}
+
+async function fetchTargetHistory(userId: string): Promise<Map<string, GoalTarget[]>> {
+  const { data, error } = await supabase
+    .from(GOAL_TARGETS_TABLE)
+    .select(TARGET_COLUMNS)
+    .eq('user_id', userId)
+    .order('effective_from', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const byGoal = new Map<string, GoalTarget[]>();
+  for (const row of (data as GoalTargetRow[] | null) ?? []) {
+    const target = mapTargetRow(row);
+    const list = byGoal.get(target.goalId);
+    if (list) {
+      list.push(target);
+    } else {
+      byGoal.set(target.goalId, [target]);
+    }
+  }
+  for (const list of byGoal.values()) {
+    list.sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
+  }
+  return byGoal;
+}
+
+function withHistory(goals: Goal[], history: Map<string, GoalTarget[]>): Goal[] {
+  return goals.map((goal) => ({
+    ...goal,
+    targetHistory: history.get(goal.id) ?? [],
+  }));
+}
+
+function sameDays(left: number[] | null, right: number[] | null): boolean {
+  if (left == null || right == null) {
+    return left == null && right == null;
+  }
+  if (left.length !== right.length) {
+    return false;
+  }
+  const a = [...left].sort((x, y) => x - y);
+  const b = [...right].sort((x, y) => x - y);
+  return a.every((day, index) => day === b[index]);
+}
+
+function sameTarget(left: Goal, right: Goal): boolean {
+  return (
+    (left.targetAmount ?? null) === (right.targetAmount ?? null) &&
+    (left.repeatPeriod ?? null) === (right.repeatPeriod ?? null) &&
+    storedTimesPerDay(left.timesPerDay) === storedTimesPerDay(right.timesPerDay) &&
+    sameDays(left.plannedDays, right.plannedDays)
+  );
+}
+
+function currentPeriod(repeatPeriod: RepeatPeriod | null): { start: string; end: string } {
+  const today = todayLocal();
+  if (repeatPeriod === 'month') {
+    const parsed = parseLocalDate(today);
+    const year = parsed.getFullYear();
+    const monthIndex = parsed.getMonth();
+    const last = new Date(year, monthIndex + 1, 0).getDate();
+    return {
+      start: toDateString(year, monthIndex, 1),
+      end: toDateString(year, monthIndex, last),
+    };
+  }
+  const weekStartsOn = getActiveSettings().weekStart;
+  const start = startOfWeek(today, weekStartsOn);
+  return { start, end: endOfWeek(start, weekStartsOn) };
+}
 
 function mapRowToEntry(row: EntryRow): GoalEntry {
   return {
@@ -217,24 +322,33 @@ async function fetchNodeRow(
 
 export async function getAllGoals(ownerId?: string): Promise<Goal[]> {
   const userId = ownerId ?? (await requireUserId());
-  const { data, error } = await supabase
-    .from(GOALS_TABLE)
-    .select('*')
-    .eq('user_id', userId)
-    .is('deleted_at', null)
-    .order('sort_order', { ascending: true });
+  const [goalsResult, history] = await Promise.all([
+    supabase
+      .from(GOALS_TABLE)
+      .select('*')
+      .eq('user_id', userId)
+      .is('deleted_at', null)
+      .order('sort_order', { ascending: true }),
+    fetchTargetHistory(userId),
+  ]);
 
-  if (error) {
-    throw error;
+  if (goalsResult.error) {
+    throw goalsResult.error;
   }
 
-  return ((data as GoalRow[] | null) ?? []).map(mapRowToNode);
+  return withHistory(
+    ((goalsResult.data as GoalRow[] | null) ?? []).map(mapRowToNode),
+    history,
+  );
 }
 
 export async function getGoal(id: string): Promise<Goal | null> {
   const userId = await requireUserId();
-  const row = await fetchNodeRow(id, userId);
-  return row ? mapRowToNode(row) : null;
+  const [row, history] = await Promise.all([
+    fetchNodeRow(id, userId),
+    fetchTargetHistory(userId),
+  ]);
+  return row ? withHistory([mapRowToNode(row)], history)[0] : null;
 }
 
 export async function getChildren(
@@ -253,12 +367,92 @@ export async function getChildren(
       ? query.is('parent_id', null)
       : query.eq('parent_id', parentId);
 
-  const { data, error } = await query;
+  const [{ data, error }, history] = await Promise.all([
+    query,
+    fetchTargetHistory(userId),
+  ]);
   if (error) {
     throw error;
   }
 
-  return ((data as GoalRow[] | null) ?? []).map(mapRowToNode);
+  return withHistory(((data as GoalRow[] | null) ?? []).map(mapRowToNode), history);
+}
+
+/** Insert or replace the target version that starts on effectiveFrom. */
+export async function upsertGoalTarget(goal: Goal, effectiveFrom: string): Promise<void> {
+  const day = normalizeDateOnly(effectiveFrom);
+  if (!day) {
+    throw new Error('A target needs a start date.');
+  }
+  const userId = goal.userId || (await requireUserId());
+  const { error } = await supabase.from(GOAL_TARGETS_TABLE).upsert(
+    {
+      goal_id: goal.id,
+      user_id: userId,
+      effective_from: day,
+      target_amount: goal.targetAmount,
+      repeat_period: goal.repeatPeriod,
+      planned_days: goal.plannedDays,
+      times_per_day: storedTimesPerDay(goal.timesPerDay),
+    },
+    { onConflict: 'goal_id,effective_from' },
+  );
+  if (error) {
+    throw error;
+  }
+}
+
+/**
+ * A change applies to the whole current week or month.
+ * The first change for an older step keeps the previous target on its start date
+ * so past periods do not pick up the new fields.
+ * Rows already inside the current period are updated so a mid-period start date
+ * does not hide the change.
+ */
+async function recordTargetChange(
+  previous: Goal,
+  next: Goal,
+  userId: string,
+): Promise<void> {
+  if (!isRepeating(next) || sameTarget(previous, next)) {
+    return;
+  }
+
+  const bounds = currentPeriod(next.repeatPeriod);
+  const { data: earlier, error: earlierError } = await supabase
+    .from(GOAL_TARGETS_TABLE)
+    .select('id')
+    .eq('user_id', userId)
+    .eq('goal_id', next.id)
+    .lt('effective_from', bounds.start)
+    .limit(1);
+  if (earlierError) {
+    throw earlierError;
+  }
+
+  const start = goalStartDate(previous);
+  if ((earlier?.length ?? 0) === 0 && start && start < bounds.start) {
+    await upsertGoalTarget({ ...previous, userId }, start);
+  }
+
+  await upsertGoalTarget({ ...next, userId }, bounds.start);
+
+  const { data: later, error: laterError } = await supabase
+    .from(GOAL_TARGETS_TABLE)
+    .select('effective_from')
+    .eq('user_id', userId)
+    .eq('goal_id', next.id)
+    .gt('effective_from', bounds.start)
+    .lte('effective_from', bounds.end);
+  if (laterError) {
+    throw laterError;
+  }
+  for (const row of (later as { effective_from: string }[] | null) ?? []) {
+    const day = normalizeDateOnly(row.effective_from);
+    if (day) {
+      await upsertGoalTarget({ ...next, userId }, day);
+    }
+  }
 }
 
 export async function createGoal(input: GoalInput): Promise<Goal> {
@@ -333,8 +527,13 @@ export async function createGoal(input: GoalInput): Promise<Goal> {
     throw error;
   }
 
+  const created = mapRowToNode(data as GoalRow);
+  if (isRepeating(created)) {
+    await upsertGoalTarget(created, goalStartDate(created) || todayLocal());
+  }
+  const history = await fetchTargetHistory(userId);
   refreshReminders();
-  return mapRowToNode(data as GoalRow);
+  return withHistory([created], history)[0];
 }
 
 /** Move a repeating goal's repeat and logs into a new first step. Returns that step's id. */
@@ -347,6 +546,16 @@ export async function convertRepeatingToParent(goalId: string): Promise<string> 
   }
   if (typeof data !== 'string' || data.length === 0) {
     throw new Error('The repeat could not be moved into a step.');
+  }
+
+  const userId = await requireUserId();
+  const { error: moveError } = await supabase
+    .from(GOAL_TARGETS_TABLE)
+    .update({ goal_id: data })
+    .eq('goal_id', goalId)
+    .eq('user_id', userId);
+  if (moveError) {
+    throw moveError;
   }
   return data;
 }
@@ -452,8 +661,11 @@ export async function updateGoal(
     throw error;
   }
 
+  const next = mapRowToNode(data as GoalRow);
+  await recordTargetChange(mapRowToNode(existing), next, userId);
+  const history = await fetchTargetHistory(userId);
   refreshReminders();
-  return mapRowToNode(data as GoalRow);
+  return withHistory([next], history)[0];
 }
 
 export async function setGoalStatus(

@@ -56,6 +56,7 @@ import {
   isRepeating,
   isTracked,
   latestDayEntry,
+  periodTarget,
   rollupTotal,
   timesPerDay,
   weekTargetFor,
@@ -122,15 +123,6 @@ type StepGroup = {
   label: string | null;
   steps: Goal[];
 };
-
-/** Month rows still count against the month's own target, not the weekly equivalent. */
-function monthPeriodTarget(step: Goal): number | null {
-  if (step.targetAmount != null && step.targetAmount > 0) {
-    return step.targetAmount;
-  }
-  const planned = step.plannedDays?.length ?? 0;
-  return planned > 0 ? planned : null;
-}
 
 function formatAmount(value: number): string {
   if (Number.isInteger(value)) {
@@ -254,26 +246,17 @@ function buildStepControl(
 
   const tracked = isTracked(step);
   const month = step.repeatPeriod === 'month';
-  const amountTarget =
-    step.targetAmount != null && step.targetAmount > 7;
-  const weekTarget = weekTargetFor(step, asOf, weekStartsOn).target;
+  const periodAmount = periodTarget(step, asOf, weekStartsOn);
+  const amountTarget = periodAmount != null && periodAmount > 7;
   if (tracked || month || amountTarget) {
-    const progress = tracked
-      ? progressRatio(
-          row.periodCount,
-          step.repeatPeriod === 'week' ? weekTarget : step.targetAmount,
-        )
-      : progressRatio(
-          row.periodCount,
-          step.repeatPeriod === 'month' ? monthPeriodTarget(step) : weekTarget,
-        );
+    const progress = progressRatio(row.periodCount, periodAmount);
     if (progress >= 1 || (tracked && row.met)) {
       return { type: 'complete', action: 'log' };
     }
     return { type: 'continuous', progress, action: 'log' };
   }
 
-  if (timesPerDay(step) > 1) {
+  if (dayProgress(step, entries, asOf).needed > 1) {
     const progress = dayProgress(step, entries, asOf);
     return {
       type: 'segmented',
@@ -284,7 +267,7 @@ function buildStepControl(
     };
   }
 
-  const target = weekTarget;
+  const target = periodAmount;
   if (target != null && target > 0 && target <= 7) {
     const total = Math.max(1, Math.round(target));
     const filled = Math.min(total, Math.max(0, Math.round(row.periodCount)));
@@ -340,10 +323,7 @@ function detailSubtitle(
     const total = row
       ? row.periodCount
       : (rollupTotal(step, nodes, entriesOnOrBefore(entries, asOf)) ?? 0);
-    const amountTarget =
-      step.repeatPeriod === 'week'
-        ? weekTargetFor(step, asOf, weekStartsOn).target
-        : step.targetAmount;
+    const amountTarget = periodTarget(step, asOf, weekStartsOn);
     const target = amountTarget != null ? formatAmount(amountTarget) : '—';
     const unit = step.unit ?? '';
     const amount = `${formatAmount(total)} / ${target} ${unit}`.trim();
@@ -354,7 +334,7 @@ function detailSubtitle(
     };
   }
 
-  if (row && timesPerDay(step) > 1) {
+  if (row && dayProgress(step, entries, asOf).needed > 1) {
     const progress = dayProgress(step, entries, asOf);
     return {
       text:
@@ -366,10 +346,7 @@ function detailSubtitle(
   }
 
   if (row) {
-    const target =
-      step.repeatPeriod === 'month'
-        ? monthPeriodTarget(step)
-        : weekTargetFor(step, asOf, weekStartsOn).target;
+    const target = periodTarget(step, asOf, weekStartsOn);
     const count = formatAmount(row.periodCount);
     const text =
       target != null
@@ -1602,7 +1579,7 @@ export default function TodayScreen() {
           ),
           periodCount: total,
           periodWord: period,
-          progressRatio: progressRatio(total, node.targetAmount),
+          progressRatio: progressRatio(total, periodTarget(node, selectedDate, weekStartsOn)),
         };
       });
   }, [entries, nodes, selectedDate, today, weekStartsOn]);

@@ -4,6 +4,7 @@ import { addDays, toDateString } from '../utils/date';
 import {
   buildChildrenMap,
   isRepeating,
+  targetFor,
   weekTargetFor,
   weeklyTarget as goalWeeklyTarget,
 } from './goalTree';
@@ -143,14 +144,24 @@ export function monthlyPlanned(
   let total = 0;
 
   for (const source of sources) {
-    if (source.repeatPeriod === 'month') {
-      if (source.targetAmount == null) {
+    const effective = targetFor(source, bounds.start, bounds.end);
+    const repeat = effective.repeatPeriod ?? source.repeatPeriod;
+    if (repeat === 'month') {
+      if (effective.targetAmount == null) {
         continue;
       }
-      total += (source.targetAmount * days) / bounds.days;
+      total += (effective.targetAmount * days) / bounds.days;
       continue;
     }
-    const amount = goalWeeklyTarget(source, weekStartsOn, bounds.start);
+    const view: Goal = {
+      ...source,
+      targetAmount: effective.targetAmount,
+      repeatPeriod: effective.repeatPeriod,
+      plannedDays: effective.plannedDays,
+      timesPerDay: effective.timesPerDay,
+      targetHistory: [],
+    };
+    const amount = goalWeeklyTarget(view, weekStartsOn, bounds.start);
     if (amount == null) {
       continue;
     }

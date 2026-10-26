@@ -1,7 +1,7 @@
-import type { GoalEntry, Goal, RepeatPeriod } from '../types/goal';
+import type { GoalEntry, Goal, GoalTarget, RepeatPeriod } from '../types/goal';
 import { normalizeDateOnly, parseLocalDate, toLocalDateString, todayLocal } from './localDate';
 import { toDateString } from '../utils/date';
-import type { WeekStart } from './settingsApi';
+import { getActiveSettings, type WeekStart } from './settingsApi';
 import { endOfWeek, startOfWeek, weekDays } from './week';
 
 export type PeriodRange = {
@@ -45,6 +45,69 @@ export function periodBounds(
   weekStartsOn: WeekStart,
 ): PeriodRange {
   return getPeriodRange(date, node.repeatPeriod ?? 'week', weekStartsOn);
+}
+
+export type EffectiveTarget = {
+  targetAmount: number | null;
+  repeatPeriod: RepeatPeriod | null;
+  plannedDays: number[] | null;
+  timesPerDay: number;
+};
+
+/**
+ * Target in effect for a period: the history row with the latest effectiveFrom
+ * on or before the period's last day. No row means the goal's own fields.
+ */
+export function targetFor(
+  goal: Goal,
+  periodStart: string,
+  periodEnd: string,
+): EffectiveTarget {
+  const start = normalizeDateOnly(periodStart) ?? periodStart.slice(0, 10);
+  const endDay = normalizeDateOnly(periodEnd) ?? periodEnd.slice(0, 10);
+  const end = endDay < start ? start : endDay;
+  let chosen: GoalTarget | null = null;
+  for (const row of goal.targetHistory ?? []) {
+    if (row.effectiveFrom <= end) {
+      chosen = row;
+    } else {
+      break;
+    }
+  }
+  if (!chosen) {
+    return {
+      targetAmount: goal.targetAmount,
+      repeatPeriod: goal.repeatPeriod,
+      plannedDays: goal.plannedDays,
+      timesPerDay: goal.timesPerDay,
+    };
+  }
+  return {
+    targetAmount: chosen.targetAmount,
+    repeatPeriod: chosen.repeatPeriod,
+    plannedDays: chosen.plannedDays,
+    timesPerDay: chosen.timesPerDay,
+  };
+}
+
+function withTarget(goal: Goal, effective: EffectiveTarget): Goal {
+  return {
+    ...goal,
+    targetAmount: effective.targetAmount,
+    repeatPeriod: effective.repeatPeriod,
+    plannedDays: effective.plannedDays,
+    timesPerDay: effective.timesPerDay,
+  };
+}
+
+/** Repeating steps use the target in effect for the period containing date. */
+function goalForDate(goal: Goal, date: string, weekStartsOn?: WeekStart): Goal {
+  if (!isRepeating(goal)) {
+    return goal;
+  }
+  const weekStart = weekStartsOn ?? getActiveSettings().weekStart;
+  const range = periodBounds(goal, date, weekStart);
+  return withTarget(goal, targetFor(goal, range.start, range.end));
 }
 
 const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -143,11 +206,12 @@ export function isDayComplete(goal: Goal, entries: GoalEntry[], date: string): b
   if (count === 0) {
     return false;
   }
+  const subject = goalForDate(goal, date);
   if (isTracked(goal)) {
     return dayTotal(entries, goal.id, date) > 0;
   }
-  if (isDaily(goal)) {
-    return count >= timesPerDay(goal);
+  if (isDaily(subject)) {
+    return count >= timesPerDay(subject);
   }
   return true;
 }
@@ -159,7 +223,7 @@ export function dayProgress(
 ): { count: number; needed: number } {
   return {
     count: dayCount(entries, goal.id, date),
-    needed: timesPerDay(goal),
+    needed: timesPerDay(goalForDate(goal, date)),
   };
 }
 
@@ -167,13 +231,14 @@ export type DayFill = 'none' | 'partial' | 'complete';
 
 /** Complete, partial (Daily more-than-once only), or nothing logged. */
 export function dayFill(goal: Goal, entries: GoalEntry[], date: string): DayFill {
+  const subject = goalForDate(goal, date);
   if (isDayComplete(goal, entries, date)) {
     return 'complete';
   }
   if (
     !isTracked(goal) &&
-    isDaily(goal) &&
-    timesPerDay(goal) > 1 &&
+    isDaily(subject) &&
+    timesPerDay(subject) > 1 &&
     dayCount(entries, goal.id, date) > 0
   ) {
     return 'partial';
@@ -183,7 +248,7 @@ export function dayFill(goal: Goal, entries: GoalEntry[], date: string): DayFill
 
 /** Weekly and monthly days with two or more sessions. Daily uses the dot fill instead. */
 export function daySessionMark(goal: Goal, entries: GoalEntry[], date: string): number | null {
-  if (isDaily(goal)) {
+  if (isDaily(goalForDate(goal, date))) {
     return null;
   }
   const count = dayCount(entries, goal.id, date);
@@ -194,12 +259,13 @@ export type YesNoLogAction = 'insert' | 'remove-day' | 'full-sheet' | 'again-she
 
 /** What a tap on a yes/no step does for this day. Amount steps use the log sheet. */
 export function yesNoLogAction(goal: Goal, entries: GoalEntry[], date: string): YesNoLogAction {
+  const subject = goalForDate(goal, date);
   const count = dayCount(entries, goal.id, date);
-  if (isDaily(goal) && timesPerDay(goal) <= 1) {
+  if (isDaily(subject) && timesPerDay(subject) <= 1) {
     return count >= 1 ? 'remove-day' : 'insert';
   }
-  if (isDaily(goal)) {
-    return count >= timesPerDay(goal) ? 'full-sheet' : 'insert';
+  if (isDaily(subject)) {
+    return count >= timesPerDay(subject) ? 'full-sheet' : 'insert';
   }
   return count >= 1 ? 'again-sheet' : 'insert';
 }
@@ -210,10 +276,10 @@ export function yesNoLogAction(goal: Goal, entries: GoalEntry[], date: string): 
  * Monthly stays target × 7 / days in that month.
  * Tracked steps still use target_amount, and return nothing when it is unset.
  */
-export function weeklyTarget(
+function weeklyAmount(
   goal: Goal,
   weekStartsOn: WeekStart,
-  weekOf?: string,
+  anchor: string,
 ): number | null {
   const tracked = goal.unit != null;
   const positive =
@@ -223,7 +289,6 @@ export function weeklyTarget(
     if (goal.targetAmount == null) {
       return null;
     }
-    const anchor = startOfWeek(weekOf?.slice(0, 10) ?? todayLocal(), weekStartsOn);
     return (goal.targetAmount * 7) / daysInMonth(anchor);
   }
 
@@ -238,6 +303,26 @@ export function weeklyTarget(
 }
 
 /**
+ * This step's target expressed as a weekly amount.
+ * Repeating steps use the target in effect for that week.
+ * A week from before the step repeated has no target.
+ */
+export function weeklyTarget(
+  goal: Goal,
+  weekStartsOn: WeekStart,
+  weekOf?: string,
+): number | null {
+  const anchor = startOfWeek(weekOf?.slice(0, 10) ?? todayLocal(), weekStartsOn);
+  const subject = isRepeating(goal)
+    ? withTarget(goal, targetFor(goal, anchor, endOfWeek(anchor, weekStartsOn)))
+    : goal;
+  if (isRepeating(goal) && !isRepeating(subject)) {
+    return null;
+  }
+  return weeklyAmount(subject, weekStartsOn, anchor);
+}
+
+/**
  * This step's own entries in the period containing date.
  * Tracked steps sum values. Daily yes/no counts complete days.
  * Other yes/no steps count sessions (rows).
@@ -249,6 +334,7 @@ export function periodTotal(
   weekStartsOn: WeekStart,
 ): number {
   const range = periodBounds(node, date, weekStartsOn);
+  const subject = goalForDate(node, date, weekStartsOn);
   const own = entries.filter(
     (entry) =>
       entry.goalId === node.id &&
@@ -260,11 +346,11 @@ export function periodTotal(
     return own.reduce((sum, entry) => sum + (entry.value ?? 0), 0);
   }
 
-  if (isDaily(node)) {
+  if (isDaily(subject)) {
     const dates = new Set(own.map((entry) => entry.entryDate.slice(0, 10)));
     let complete = 0;
     for (const day of dates) {
-      if (isDayComplete(node, entries, day)) {
+      if (isDayComplete(subject, entries, day)) {
         complete += 1;
       }
     }
@@ -274,17 +360,40 @@ export function periodTotal(
   return own.length;
 }
 
-/** False when the step has no target amount. */
+/**
+ * Target number for the period containing date.
+ * Weeks use weekTargetFor, including start-week proration.
+ * Months use the target in effect on the month's last day.
+ */
+export function periodTarget(
+  goal: Goal,
+  date: string,
+  weekStartsOn: WeekStart,
+): number | null {
+  if ((goal.repeatPeriod ?? 'week') === 'month') {
+    const range = periodBounds(goal, date, weekStartsOn);
+    const subject = withTarget(goal, targetFor(goal, range.start, range.end));
+    if (subject.targetAmount != null && subject.targetAmount > 0) {
+      return subject.targetAmount;
+    }
+    const planned = subject.plannedDays?.length ?? 0;
+    return planned > 0 ? planned : null;
+  }
+  return weekTargetFor(goal, date, weekStartsOn).target;
+}
+
+/** False when the period has no target. */
 export function isPeriodTargetMet(
   node: Goal,
   entries: GoalEntry[],
   date: string,
   weekStartsOn: WeekStart,
 ): boolean {
-  if (node.targetAmount == null) {
+  const target = periodTarget(node, date, weekStartsOn);
+  if (target == null || target <= 0) {
     return false;
   }
-  return periodTotal(node, entries, date, weekStartsOn) >= node.targetAmount;
+  return periodTotal(node, entries, date, weekStartsOn) >= target;
 }
 
 /** Actual start date, or the created date when that is unset. Date only. */
@@ -331,14 +440,21 @@ export function weekTargetFor(
 ): WeekTarget {
   const week = startOfWeek(weekOf, weekStartsOn);
   const allDays = weekDayDates(week, weekStartsOn);
+  const subject = isRepeating(goal)
+    ? withTarget(goal, targetFor(goal, week, endOfWeek(week, weekStartsOn)))
+    : goal;
+  if (isRepeating(goal) && !isRepeating(subject)) {
+    return { target: null, availableDays: allDays };
+  }
+
   const start = goalStartDate(goal);
   if (week !== startOfWeek(start, weekStartsOn)) {
-    return { target: weeklyTarget(goal, weekStartsOn, week), availableDays: allDays };
+    return { target: weeklyAmount(subject, weekStartsOn, week), availableDays: allDays };
   }
 
   const availableDays = allDays.filter((day) => dateKey(day) >= start);
   const available = availableDays.length;
-  const full = weeklyTarget(goal, weekStartsOn, week);
+  const full = weeklyAmount(subject, weekStartsOn, week);
 
   if (isTracked(goal)) {
     return {
@@ -347,7 +463,7 @@ export function weekTargetFor(
     };
   }
 
-  if (isDaily(goal)) {
+  if (isDaily(subject)) {
     return { target: available, availableDays };
   }
 
@@ -356,9 +472,9 @@ export function weekTargetFor(
   }
 
   let cap = available;
-  if (goal.plannedDays != null && goal.plannedDays.length > 0) {
+  if (subject.plannedDays != null && subject.plannedDays.length > 0) {
     const availableWeekdays = new Set(availableDays.map((day) => day.getDay()));
-    const planned = goal.plannedDays.filter((day) => availableWeekdays.has(day)).length;
+    const planned = subject.plannedDays.filter((day) => availableWeekdays.has(day)).length;
     cap = Math.min(available, planned);
   }
 

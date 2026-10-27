@@ -1,6 +1,6 @@
 module.exports = {
   expo: {
-    name: 'TrackIt',
+    name: process.env.APP_DISPLAY_NAME ?? 'TrackIt Dev',
     slug: 'trackit',
     owner: 'blue_sky_development',
     version: '1.0.0',
@@ -9,6 +9,10 @@ module.exports = {
     userInterfaceStyle: 'light',
     ios: {
       supportsTablet: true,
+      bundleIdentifier: 'com.turleystudios.trackit',
+      config: {
+        usesNonExemptEncryption: false,
+      },
     },
     android: {
       adaptiveIcon: {

@@ -1,7 +1,7 @@
 module.exports = {
   expo: {
-    name: process.env.APP_VARIANT === 'preview' ? 'TrackIt' : 'TrackIt Dev',
-    slug: 'TrackItv3',
+    name: 'TrackIt',
+    slug: 'trackit',
     owner: 'blue_sky_development',
     version: '1.0.0',
     orientation: 'portrait',
@@ -29,12 +29,14 @@ module.exports = {
     ],
     extra: {
       eas: {
-        projectId: 'ead878c6-d7a0-4b4c-8610-f7df6fc3f146',
+        projectId: '7e58c847-230c-4e14-b28c-e7d3838534ea',
       },
     },
-    runtimeVersion: 'exposdk:58.0.0',
+    runtimeVersion: {
+      policy: 'appVersion',
+    },
     updates: {
-      url: 'https://u.expo.dev/ead878c6-d7a0-4b4c-8610-f7df6fc3f146',
+      url: 'https://u.expo.dev/7e58c847-230c-4e14-b28c-e7d3838534ea',
     },
   },
 };

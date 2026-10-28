@@ -64,6 +64,7 @@ type GoalRow = {
   repeat_period: string | null;
   planned_days: number[] | null;
   times_per_day?: number | string | null;
+  progress_pct?: number | string | null;
 };
 
 type EntryRow = {
@@ -139,7 +140,16 @@ function mapGoal(row: GoalRow): Goal {
     timesPerDay: storedTimesPerDay(amountToNumber(row.times_per_day) ?? null),
     reminderTime: null,
     starterKey: null,
+    progressPct: mapProgressPct(row.progress_pct),
   };
+}
+
+function mapProgressPct(value: number | string | null | undefined): number | null {
+  const amount = amountToNumber(value);
+  if (amount == null) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, Math.round(amount)));
 }
 
 function mapEntry(row: EntryRow): GoalEntry {

@@ -410,6 +410,97 @@ export function isTracked(node: Goal): boolean {
   return node.unit !== null;
 }
 
+/** One-time steps and goals with no unit. Repeating and tracked items are excluded. */
+export function canSetProgress(node: Goal): boolean {
+  return !isRepeating(node) && !isTracked(node);
+}
+
+export type GoalTree = {
+  nodes: Goal[];
+  entries: GoalEntry[];
+};
+
+function clampPct(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+/**
+ * Current percent for a goal.
+ * Done one-time goals are 100. Repeating goals have no percent.
+ * A tracked one-time goal with a target uses its rolled-up total.
+ * An untracked one-time leaf uses progress_pct.
+ * A parent uses its own estimate when set, otherwise the average of its
+ * non-repeating children.
+ */
+export function effectivePct(goal: Goal, tree: GoalTree): number | null {
+  return effectivePctSeen(goal, tree, new Set());
+}
+
+function effectivePctSeen(goal: Goal, tree: GoalTree, seen: Set<string>): number | null {
+  if (seen.has(goal.id)) {
+    return null;
+  }
+  seen.add(goal.id);
+
+  if (isRepeating(goal)) {
+    return null;
+  }
+  if (goal.status === 'done') {
+    return 100;
+  }
+  if (isTracked(goal) && goal.targetAmount != null && goal.targetAmount > 0) {
+    const total = rollupTotal(goal, tree.nodes, tree.entries) ?? 0;
+    return clampPct(Math.min(100, (total / goal.targetAmount) * 100));
+  }
+
+  const children = buildChildrenMap(tree.nodes).get(goal.id) ?? [];
+  if (children.length === 0) {
+    return isTracked(goal) ? null : (goal.progressPct ?? 0);
+  }
+  if (goal.progressPct != null) {
+    return clampPct(goal.progressPct);
+  }
+
+  const values: number[] = [];
+  for (const child of children) {
+    if (isRepeating(child)) {
+      continue;
+    }
+    const pct = effectivePctSeen(child, tree, seen);
+    if (pct != null) {
+      values.push(pct);
+    }
+  }
+  if (values.length === 0) {
+    return null;
+  }
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return clampPct(average);
+}
+
+/**
+ * Every direct child is done and this goal is still open.
+ * Repeating children are never done, so a goal with a repeating step does not qualify.
+ */
+export function needsNextStep(goal: Goal, tree: Goal[]): boolean {
+  if (goal.status === 'done') {
+    return false;
+  }
+  const children = buildChildrenMap(tree).get(goal.id) ?? [];
+  if (children.length === 0) {
+    return false;
+  }
+  return children.every((child) => child.status === 'done');
+}
+
+/** A parent whose percent is the user's own estimate rather than an average of steps. */
+export function isEstimate(goal: Goal, nodes: Goal[]): boolean {
+  if (goal.progressPct == null || isRepeating(goal)) {
+    return false;
+  }
+  return (buildChildrenMap(nodes).get(goal.id)?.length ?? 0) > 0;
+}
+
 function weekDayDates(weekOf: string, weekStartsOn: WeekStart): Date[] {
   return weekDays(weekOf, weekStartsOn).map((day) => parseLocalDate(day));
 }

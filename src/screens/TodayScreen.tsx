@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -27,15 +27,22 @@ import {
   FloatingAddButton,
 } from '../components/FloatingAddButton';
 import { KeyboardSafe } from '../components/KeyboardSafe';
+import { DatePickerModal } from '../components/DatePickerModal';
+import { NEXT_STEP_MESSAGE, NextStepActions } from '../components/NextStepPrompt';
 import { PageHeader } from '../components/PageHeader';
+import ProgressSheet from '../components/ProgressSheet';
 import { showActionSheet } from '../components/showActionSheet';
+import { AREA_ICONS } from '../constants/areaIcons';
+import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import {
+  createGoal,
   deleteEntry,
   deleteEntryById,
   getAllGoals,
   getEntries,
   insertEntry,
+  saveGoalProgress,
   setGoalStatus,
   type UpsertedEntry,
 } from '../lib/goalTreeApi';
@@ -52,6 +59,7 @@ import {
   buildChildrenMap,
   isDaily,
   isLeaf,
+  needsNextStep,
   completionDates,
   dayFill,
   dayProgress,
@@ -68,6 +76,7 @@ import {
   yesNoLogAction,
 } from '../lib/goalTree';
 import type { WeekStart } from '../lib/settingsApi';
+import { TIP_DO_LOG, TIP_DO_OPEN_GOAL, dismissTip, getDismissedTips } from '../lib/tips';
 import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
 import {
   ensureNotificationPermission,
@@ -109,7 +118,7 @@ type RepeatingRow = {
   progressRatio: number;
 };
 
-type ControlAction = 'toggle' | 'status' | 'log';
+type ControlAction = 'toggle' | 'status' | 'log' | 'progress';
 
 type StepControl =
   | { type: 'empty'; action: ControlAction }
@@ -121,12 +130,18 @@ type StepControl =
       loggedOnDay: boolean;
       action: 'toggle';
     }
-  | { type: 'continuous'; progress: number; action: 'log' };
+  | { type: 'continuous'; progress: number; action: 'log' }
+  | { type: 'percent'; pct: number; action: 'progress' };
+
+type DoEntry =
+  | { kind: 'step'; step: Goal }
+  | { kind: 'next'; goal: Goal };
 
 type StepGroup = {
   id: string;
   label: string | null;
-  steps: Goal[];
+  category: string | null;
+  rows: DoEntry[];
 };
 
 function formatAmount(value: number): string {
@@ -197,28 +212,68 @@ function parentRowTitle(
   return parent.title;
 }
 
-function groupActionableSteps(
-  steps: Goal[],
-  byId: Map<string, Goal>,
-): StepGroup[] {
+/** Actionable steps, plus a next-step prompt where a finished parent sits in Plan order. */
+function doEntriesInPlanOrder(
+  nodes: Goal[],
+  childrenMap: Map<string | null, Goal[]>,
+  asOf: string,
+  today: string,
+): DoEntry[] {
+  const steps = actionableInPlanOrder(nodes, childrenMap, asOf);
+  const included = new Set(steps.map((step) => step.id));
+  const showNext = asOf === today;
+  const entries: DoEntry[] = [];
+  const seen = new Set<string>();
+
+  const walk = (node: Goal) => {
+    seen.add(node.id);
+    if (included.has(node.id)) {
+      entries.push({ kind: 'step', step: node });
+    }
+    if (showNext && needsNextStep(node, nodes)) {
+      entries.push({ kind: 'next', goal: node });
+    }
+    for (const child of childrenMap.get(node.id) ?? []) {
+      walk(child);
+    }
+  };
+
+  for (const root of childrenMap.get(null) ?? []) {
+    walk(root);
+  }
+
+  for (const step of steps) {
+    if (!seen.has(step.id)) {
+      entries.push({ kind: 'step', step });
+    }
+  }
+  return entries;
+}
+
+function groupDoEntries(entries: DoEntry[], byId: Map<string, Goal>): StepGroup[] {
   const groups: StepGroup[] = [];
   const indexById = new Map<string, number>();
 
-  for (const step of steps) {
-    const top = topLevelAncestor(step, byId) ?? step;
+  for (const entry of entries) {
+    const node = entry.kind === 'step' ? entry.step : entry.goal;
+    const top = topLevelAncestor(node, byId) ?? node;
     let index = indexById.get(top.id);
     if (index == null) {
       index = groups.length;
       indexById.set(top.id, index);
-      groups.push({ id: top.id, label: null, steps: [] });
+      groups.push({ id: top.id, label: null, category: null, rows: [] });
     }
-    groups[index]?.steps.push(step);
+    groups[index]?.rows.push(entry);
   }
 
   for (const group of groups) {
-    const hasDescendant = group.steps.some((step) => step.id !== group.id);
-    if (hasDescendant) {
-      group.label = byId.get(group.id)?.title ?? null;
+    const hasStructure = group.rows.some(
+      (entry) => entry.kind === 'next' || entry.step.id !== group.id,
+    );
+    if (hasStructure) {
+      const topGoal = byId.get(group.id);
+      group.label = topGoal?.title ?? null;
+      group.category = topGoal?.category ?? null;
     }
   }
 
@@ -245,6 +300,13 @@ function buildStepControl(
         return { type: 'complete', action: 'log' };
       }
       return { type: 'continuous', progress, action: 'log' };
+    }
+    if (!isRepeating(step)) {
+      const pct = step.progressPct ?? 0;
+      if (pct >= 1) {
+        return { type: 'percent', pct: Math.min(100, pct), action: 'progress' };
+      }
+      return { type: 'empty', action: 'progress' };
     }
     return { type: 'empty', action: 'status' };
   }
@@ -628,6 +690,17 @@ function StepControlGraphic({ control }: { control: StepControl }) {
         </Svg>
         <View style={styles.graphicOverlay} pointerEvents="none">
           <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+        </View>
+      </View>
+    );
+  }
+
+  if (control.type === 'percent') {
+    return (
+      <View style={styles.graphic}>
+        <ContinuousRing progress={control.pct / 100} />
+        <View style={styles.graphicOverlay} pointerEvents="none">
+          <Text style={styles.percentLabel}>{Math.round(control.pct)}</Text>
         </View>
       </View>
     );
@@ -1020,6 +1093,9 @@ function controlLabel(
   if (control.action === 'log') {
     return 'Log an amount';
   }
+  if (control.action === 'progress') {
+    return 'Set progress';
+  }
   if (control.action === 'status') {
     return `Status ${step.status}. Tap to change.`;
   }
@@ -1196,6 +1272,38 @@ function DoRow({
   );
 }
 
+const DO_TIPS = [
+  {
+    id: TIP_DO_LOG,
+    text: 'Tap the circle to log progress or mark a step done.',
+  },
+  {
+    id: TIP_DO_OPEN_GOAL,
+    text: "Tap a goal's name to see its progress, streaks, and details.",
+  },
+] as const;
+
+function ProTipCard({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+  return (
+    <View style={styles.tipCard}>
+      <MaterialCommunityIcons name="lightbulb-on-outline" size={22} color="#007aff" />
+      <View style={styles.tipCopy}>
+        <Text style={styles.tipKicker}>PRO TIP</Text>
+        <Text style={styles.tipText}>{text}</Text>
+      </View>
+      <Pressable
+        onPress={onDismiss}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Got it"
+        style={({ pressed }) => [pressed && styles.pressed]}
+      >
+        <Text style={styles.tipDismiss}>Got it</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function getChecklistHeading(selectedDate: string, today: string): string {
   if (selectedDate === today) {
     return 'Today';
@@ -1210,6 +1318,7 @@ export default function TodayScreen() {
   const route = useRoute<RouteProp<TodayStackParamList, 'TodayMain'>>();
   const focusToday = route.params?.focusToday;
   const freshGoalId = route.params?.freshGoalId;
+  const { user } = useAuth();
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const today = todayLocal();
@@ -1251,8 +1360,16 @@ export default function TodayScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [logStepId, setLogStepId] = useState<string | null>(null);
+  const [progressStepId, setProgressStepId] = useState<string | null>(null);
+  const [nextTitleGoalId, setNextTitleGoalId] = useState<string | null>(null);
+  const [nextTitle, setNextTitle] = useState('');
+  const [addingNext, setAddingNext] = useState(false);
+  const [donePromptGoalId, setDonePromptGoalId] = useState<string | null>(null);
   const [logAmount, setLogAmount] = useState('');
   const [logError, setLogError] = useState<string | null>(null);
+  const [dismissedTips, setDismissedTips] = useState<ReadonlySet<string> | null>(null);
+  const tipsLoadGen = useRef(0);
+  const dismissedDuringLoad = useRef(new Set<string>());
   const pendingTogglesRef = useRef<Set<string>>(new Set());
   const visibleWeekStartRef = useRef(visibleWeekStart);
   const nodesRef = useRef(nodes);
@@ -1309,6 +1426,56 @@ export default function TodayScreen() {
     useCallback(() => {
       void loadTodayData(visibleWeekStartRef.current);
     }, [loadTodayData]),
+  );
+
+  const dismissDoTip = useCallback(
+    (tipId: string) => {
+      dismissedDuringLoad.current.add(tipId);
+      setDismissedTips((current) => {
+        if (current == null || current.has(tipId)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.add(tipId);
+        return next;
+      });
+      const userId = user?.id;
+      if (!userId) {
+        return;
+      }
+      void dismissTip(userId, tipId);
+    },
+    [user?.id],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const userId = user?.id;
+      if (!userId) {
+        setDismissedTips(null);
+        return;
+      }
+      const gen = ++tipsLoadGen.current;
+      dismissedDuringLoad.current = new Set();
+      let cancelled = false;
+      void getDismissedTips(userId).then((ids) => {
+        if (cancelled || gen !== tipsLoadGen.current) {
+          return;
+        }
+        if (ids == null) {
+          setDismissedTips(null);
+          return;
+        }
+        const next = new Set(ids);
+        for (const id of dismissedDuringLoad.current) {
+          next.add(id);
+        }
+        setDismissedTips(next);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [user?.id]),
   );
 
   const handleVisibleWeekChange = useCallback(
@@ -1589,14 +1756,18 @@ export default function TodayScreen() {
       });
   }, [entries, nodes, selectedDate, today, weekStartsOn]);
 
-  const orderedSteps = useMemo(
-    () => actionableInPlanOrder(nodes, childrenMap, selectedDate),
-    [childrenMap, nodes, selectedDate],
+  const doEntries = useMemo(
+    () => doEntriesInPlanOrder(nodes, childrenMap, selectedDate, today),
+    [childrenMap, nodes, selectedDate, today],
   );
   const stepGroups = useMemo(
-    () => groupActionableSteps(orderedSteps, nodesById),
-    [nodesById, orderedSteps],
+    () => groupDoEntries(doEntries, nodesById),
+    [doEntries, nodesById],
   );
+  const activeTip =
+    dismissedTips == null
+      ? undefined
+      : DO_TIPS.find((tip) => !dismissedTips.has(tip.id));
   const repeatingById = useMemo(
     () => new Map(repeatingRows.map((row) => [row.id, row])),
     [repeatingRows],
@@ -1610,6 +1781,7 @@ export default function TodayScreen() {
     if (appearance === 'hidden' || isFutureDate(selectedDate, today)) {
       return;
     }
+    dismissDoTip(TIP_DO_LOG);
 
     const markingDone = appearance === 'open';
     const next: GoalStatus = markingDone ? 'done' : 'active';
@@ -1625,6 +1797,7 @@ export default function TodayScreen() {
             ...node,
             status: 'done',
             actualEndDate: selectedDate,
+            progressPct: 100,
           };
         }
         return {
@@ -1657,6 +1830,116 @@ export default function TodayScreen() {
     setNodes((current) => current.map((item) => byId.get(item.id) ?? item));
   };
 
+  const openProgress = (goalId: string) => {
+    setProgressStepId(goalId);
+  };
+
+  const closeProgress = () => {
+    setProgressStepId(null);
+  };
+
+  const saveProgress = (pct: number) => {
+    const step = nodes.find((node) => node.id === progressStepId);
+    if (!step) {
+      closeProgress();
+      return;
+    }
+    closeProgress();
+    dismissDoTip(TIP_DO_LOG);
+    const previous = nodes;
+    const activating = pct > 0 && step.status === 'pending';
+    const optimistic: Goal = {
+      ...step,
+      progressPct: pct,
+      status: activating ? 'active' : step.status,
+      actualStartDate:
+        activating && step.actualStartDate == null ? today : step.actualStartDate,
+    };
+    setNodes((current) => current.map((node) => (node.id === step.id ? optimistic : node)));
+    void saveGoalProgress(step.id, pct)
+      .then((goals) => {
+        applySavedGoals(goals);
+      })
+      .catch((error) => {
+        console.warn('Failed to save progress', error);
+        setNodes(previous);
+        Alert.alert(
+          'Could not save',
+          error instanceof Error ? error.message : 'Progress was not saved.',
+        );
+      });
+  };
+
+  const markProgressDone = () => {
+    const step = nodes.find((node) => node.id === progressStepId);
+    closeProgress();
+    if (!step || isFutureDate(selectedDate, today)) {
+      return;
+    }
+    handleOneTime(step, oneTimeOnDate(step, selectedDate));
+  };
+
+  const createNextStep = (goalId: string) => {
+    const trimmed = nextTitle.trim();
+    if (!trimmed || addingNext) {
+      return;
+    }
+    setAddingNext(true);
+    void createGoal({
+      title: trimmed,
+      parentId: goalId,
+      status: 'active',
+      actualStartDate: today,
+    })
+      .then((created) => {
+        setNodes((current) => [...current, created]);
+        setNextTitle('');
+        setNextTitleGoalId(null);
+      })
+      .catch((error) => {
+        console.warn('Failed to add step', error);
+        Alert.alert(
+          'Could not add step',
+          error instanceof Error ? error.message : 'Could not add a step.',
+        );
+      })
+      .finally(() => {
+        setAddingNext(false);
+      });
+  };
+
+  const confirmGoalDone = (date: Date) => {
+    const goal = nodes.find((node) => node.id === donePromptGoalId);
+    setDonePromptGoalId(null);
+    if (!goal) {
+      return;
+    }
+    const picked = toLocalDateString(date);
+    const day = picked > today ? today : picked;
+    const previous = nodes;
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === goal.id
+          ? { ...node, status: 'done', actualEndDate: day, progressPct: 100 }
+          : node,
+      ),
+    );
+    void setGoalStatus(goal.id, 'done', day)
+      .then((updated) => {
+        applySavedGoals([updated]);
+      })
+      .catch((error) => {
+        console.warn('Failed to mark goal done', error);
+        setNodes(previous);
+        Alert.alert(
+          'Could not update',
+          error instanceof Error ? error.message : 'Could not mark this goal done.',
+        );
+      });
+  };
+
+  const donePromptGoal = nodes.find((node) => node.id === donePromptGoalId) ?? null;
+
   const openLog = (goalId: string) => {
     if (isFutureDate(selectedDate, today)) {
       return;
@@ -1684,6 +1967,7 @@ export default function TodayScreen() {
     if (pendingTogglesRef.current.has(toggleKey)) {
       return;
     }
+    dismissDoTip(TIP_DO_LOG);
     setEntries(nextEntries);
     pendingTogglesRef.current.add(toggleKey);
     void persist
@@ -1974,23 +2258,91 @@ export default function TodayScreen() {
       </View>
       </View>
 
-      {orderedSteps.length > 0 ? (
-        stepGroups.map((group, groupIndex) => (
+      {stepGroups.length > 0 ? (
+        <>
+        {activeTip ? (
+          <ProTipCard text={activeTip.text} onDismiss={() => dismissDoTip(activeTip.id)} />
+        ) : null}
+        {stepGroups.map((group, groupIndex) => (
           <View
             key={group.id}
-            style={
-              groupIndex > 0
-                ? group.label
-                  ? styles.groupSpacedLabeled
-                  : styles.groupSpaced
-                : undefined
-            }
+            style={groupIndex > 0 ? styles.groupSpaced : undefined}
           >
-            {group.label ? (
-              <Text style={styles.groupLabel}>{group.label}</Text>
-            ) : null}
             <View style={styles.checklistCard}>
-              {group.steps.map((step, rowIndex) => {
+              {group.label ? (
+                <>
+                  <Pressable
+                    onPress={() => {
+                      dismissDoTip(TIP_DO_OPEN_GOAL);
+                      navigation.navigate('Goal', { goalId: group.id });
+                    }}
+                    style={({ pressed }) => [
+                      styles.cardHeader,
+                      pressed && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={group.label}
+                  >
+                    {group.category && AREA_ICONS[group.category] ? (
+                      <MaterialCommunityIcons
+                        name={AREA_ICONS[group.category]}
+                        size={15}
+                        color="#8e8e93"
+                      />
+                    ) : null}
+                    <Text style={styles.cardHeaderTitle} numberOfLines={1}>
+                      {group.label}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={15} color="#8e8e93" />
+                  </Pressable>
+                  <View style={styles.headerDivider} />
+                </>
+              ) : null}
+              {group.rows.map((entry, rowIndex) => {
+                if (entry.kind === 'next') {
+                  const goal = entry.goal;
+                  const adding = nextTitleGoalId === goal.id;
+                  return (
+                    <View key={`next-${goal.id}`}>
+                      {rowIndex > 0 ? <View style={styles.hairline} /> : null}
+                      <View style={styles.nextRow}>
+                        <View style={styles.controlHit}>
+                          <MaterialCommunityIcons
+                            name="check-circle"
+                            size={22}
+                            color="#248A3D"
+                          />
+                        </View>
+                        <View style={styles.nextCopy}>
+                          <Text style={styles.nextMessage}>{NEXT_STEP_MESSAGE}</Text>
+                          {adding ? (
+                            <TextInput
+                              value={nextTitle}
+                              onChangeText={setNextTitle}
+                              placeholder="Step name"
+                              placeholderTextColor="#8e8e93"
+                              style={styles.nextInput}
+                              returnKeyType="done"
+                              autoFocus
+                              editable={!addingNext}
+                              onSubmitEditing={() => createNextStep(goal.id)}
+                              accessibilityLabel="New step name"
+                            />
+                          ) : (
+                            <NextStepActions
+                              onAddStep={() => {
+                                setNextTitle('');
+                                setNextTitleGoalId(goal.id);
+                              }}
+                              onMarkDone={() => setDonePromptGoalId(goal.id)}
+                            />
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }
+                const step = entry.step;
                 const row = repeatingById.get(step.id);
                 const futureDay = isFutureDate(selectedDate, today);
                 const appearance = oneTimeOnDate(step, selectedDate);
@@ -2021,6 +2373,13 @@ export default function TodayScreen() {
                     return;
                   }
                   const createdRow = step.id === cardGoalId;
+                  if (control.action === 'progress') {
+                    openProgress(step.id);
+                    if (createdRow) {
+                      dismissCreatedCard();
+                    }
+                    return;
+                  }
                   if (control.action === 'log') {
                     openLog(step.id);
                     if (createdRow) {
@@ -2082,9 +2441,10 @@ export default function TodayScreen() {
                           />
                         ) : undefined
                       }
-                      onOpen={() =>
-                        navigation.navigate('Goal', { goalId: step.id })
-                      }
+                      onOpen={() => {
+                        dismissDoTip(TIP_DO_OPEN_GOAL);
+                        navigation.navigate('Goal', { goalId: step.id });
+                      }}
                       onControl={onControl}
                     />
                   </View>
@@ -2092,7 +2452,8 @@ export default function TodayScreen() {
               })}
             </View>
           </View>
-        ))
+        ))}
+        </>
       ) : (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyText}>
@@ -2224,6 +2585,28 @@ export default function TodayScreen() {
           </Pressable>
         </KeyboardSafe>
       </Modal>
+      <ProgressSheet
+        visible={progressStepId != null}
+        title={nodes.find((node) => node.id === progressStepId)?.title ?? ''}
+        initialPct={nodes.find((node) => node.id === progressStepId)?.progressPct ?? 0}
+        onSave={saveProgress}
+        onMarkDone={markProgressDone}
+        onCancel={closeProgress}
+      />
+      {donePromptGoal ? (
+        <DatePickerModal
+          title="Actual end"
+          value={parseLocalDate(today)}
+          minimumDate={
+            donePromptGoal.actualStartDate && donePromptGoal.actualStartDate <= today
+              ? parseLocalDate(donePromptGoal.actualStartDate)
+              : undefined
+          }
+          maximumDate={parseLocalDate(today)}
+          onCancel={() => setDonePromptGoalId(null)}
+          onConfirm={confirmGoalDone}
+        />
+      ) : null}
     </View>
   );
 }
@@ -2450,27 +2833,70 @@ const styles = StyleSheet.create({
   groupSpaced: {
     marginTop: 12,
   },
-  groupSpacedLabeled: {
-    marginTop: 20,
-  },
-  groupLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    color: '#6B6B70',
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
   checklistCard: {
     backgroundColor: '#fff',
     borderRadius: 14,
     marginHorizontal: 16,
     overflow: 'hidden',
   },
+  tipCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#E8F1FF',
+    borderRadius: 14,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingVertical: 12,
+    paddingLeft: 12,
+    paddingRight: 14,
+  },
+  tipCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  tipKicker: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: '#007aff',
+  },
+  tipText: {
+    fontSize: 15,
+    lineHeight: 20,
+    color: '#1C1C1E',
+  },
+  tipDismiss: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#007aff',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 12,
+    paddingBottom: 10,
+    paddingLeft: 8,
+    paddingRight: 16,
+  },
+  cardHeaderTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1C1C1E',
+  },
+  headerDivider: {
+    height: 1,
+    backgroundColor: '#ECECEF',
+    marginLeft: 8,
+    marginRight: 16,
+  },
   hairline: {
     height: 1,
     backgroundColor: '#ECECEF',
+    marginLeft: 8 + 44 + 10,
+    marginRight: 16,
   },
   doRow: {
     flexDirection: 'row',
@@ -2486,6 +2912,34 @@ const styles = StyleSheet.create({
     height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  nextRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    paddingLeft: 8,
+    paddingRight: 16,
+    gap: 10,
+  },
+  nextCopy: {
+    flex: 1,
+    gap: 8,
+    paddingTop: 6,
+  },
+  nextMessage: {
+    fontSize: 15,
+    lineHeight: 20,
+    color: '#1C1C1E',
+  },
+  nextInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 17,
+    minHeight: 44,
+    color: '#1C1C1E',
   },
   controlDisabled: {
     opacity: 0.4,
@@ -2559,6 +3013,11 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  percentLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#248A3D',
   },
   graphicOverlay: {
     position: 'absolute',

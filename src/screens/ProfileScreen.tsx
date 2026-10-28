@@ -23,6 +23,7 @@ import { listEarnedBadges, type EarnedBadge } from '../lib/badges';
 import { clockFromDate, dateAtClock } from '../lib/clock';
 import { localCalendarDay } from '../lib/localDate';
 import { getDisplayName, saveDisplayName } from '../lib/profileApi';
+import { resetTips } from '../lib/tips';
 import {
   DEFAULT_CHECKIN,
   ensureNotificationPermission,
@@ -230,6 +231,21 @@ export default function ProfileScreen({ navigation }: Props) {
     })();
   };
 
+  const showTipsAgain = () => {
+    const userId = user?.id;
+    if (!userId) {
+      Alert.alert('Could not reset tips', 'Try again in a moment.');
+      return;
+    }
+    void resetTips(userId).then((ok) => {
+      if (ok) {
+        Alert.alert('Tips will show again');
+        return;
+      }
+      Alert.alert('Could not reset tips', 'Try again in a moment.');
+    });
+  };
+
   const confirmLogout = () => {
     if (signingOut) {
       return;
@@ -391,6 +407,18 @@ export default function ProfileScreen({ navigation }: Props) {
             </Pressable>
           </>
         ) : null}
+      </View>
+
+      <Text style={styles.section}>Help</Text>
+      <View style={styles.card}>
+        <Pressable
+          onPress={showTipsAgain}
+          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Show tips again"
+        >
+          <Text style={styles.rowLabel}>Show tips again</Text>
+        </Pressable>
       </View>
 
       <Text style={styles.section}>Account</Text>

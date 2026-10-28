@@ -19,6 +19,8 @@ import { CommentsEntry } from '../components/CommentsEntry';
 import { DEFAULT_DRAGGABLE_ITEM_HEIGHT, DraggableItem } from '../components/DraggableItem';
 import GoalDetailCards from '../components/GoalDetailCards';
 import GoalEditForm, { type GoalEditFormHandle } from '../components/GoalEditForm';
+import { NEXT_STEP_MESSAGE, NextStepActions } from '../components/NextStepPrompt';
+import ProgressSheet from '../components/ProgressSheet';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { KeyboardSafe } from '../components/KeyboardSafe';
@@ -42,17 +44,22 @@ import {
   getEntries,
   insertEntry,
   reorderGoals,
+  saveGoalProgress,
   setGoalStatus,
   type UpsertedEntry,
 } from '../lib/goalTreeApi';
 import {
   buildChildrenMap,
+  canSetProgress,
   dayCount,
   dayFill,
   dayProgress,
   daySessionMark,
   dayTotal,
+  effectivePct,
   goalStartDate,
+  isEstimate,
+  needsNextStep,
   isDaily,
   isDayComplete,
   isRepeating,
@@ -354,6 +361,42 @@ function StepSiblingList({
   );
 }
 
+function ProgressReadout({
+  pct,
+  caption,
+  readOnly,
+  onPress,
+}: {
+  pct: number | null;
+  caption: string | null;
+  readOnly: boolean;
+  onPress: () => void;
+}) {
+  const body = (
+    <View style={styles.progressRow}>
+      <View style={styles.progressCopy}>
+        <Text style={styles.progressTitle}>Progress</Text>
+        <Text style={styles.progressValue}>{pct == null ? '—' : `${Math.round(pct)}%`}</Text>
+        {caption ? <Text style={styles.analysisDetail}>{caption}</Text> : null}
+      </View>
+      {readOnly ? null : <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />}
+    </View>
+  );
+  if (readOnly) {
+    return body;
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Progress"
+      style={({ pressed }) => [pressed && styles.pressed]}
+    >
+      {body}
+    </Pressable>
+  );
+}
+
 export default function GoalScreen({ navigation, route }: Props) {
   const { goalId, readOnly = false, sharedByName } = route.params;
   const { user } = useAuth();
@@ -370,6 +413,7 @@ export default function GoalScreen({ navigation, route }: Props) {
   const [newTitle, setNewTitle] = useState('');
   const [adding, setAdding] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [progressOpen, setProgressOpen] = useState(false);
   const [logAmount, setLogAmount] = useState('');
   const [logError, setLogError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -743,7 +787,7 @@ export default function GoalScreen({ navigation, route }: Props) {
     const previous = node;
     const nextStatus: GoalStatus = markingDone ? 'done' : 'active';
     const optimistic: Goal = markingDone
-      ? { ...node, status: 'done', actualEndDate: today }
+      ? { ...node, status: 'done', actualEndDate: today, progressPct: 100 }
       : { ...node, status: 'active', actualEndDate: null };
     setNode(optimistic);
     setNodes((current) =>
@@ -836,6 +880,53 @@ export default function GoalScreen({ navigation, route }: Props) {
   const doses = timesPerDay(node);
   const doseProgress = dayProgress(node, entries, today);
   const sessionsToday = dayCount(entries, node.id, today);
+  const showProgress = !editing && canSetProgress(node);
+  const progressValue = showProgress ? effectivePct(node, { nodes, entries }) : null;
+  const progressCaption =
+    showProgress && children.length > 0 && node.status !== 'done'
+      ? isEstimate(node, nodes)
+        ? 'your estimate'
+        : 'from steps'
+      : null;
+  const progressControl = showProgress ? (
+    <ProgressReadout
+      pct={progressValue}
+      caption={progressCaption}
+      readOnly={readOnly}
+      onPress={() => setProgressOpen(true)}
+    />
+  ) : null;
+
+  const persistProgress = (pct: number | null) => {
+    const previousNode = node;
+    const previousNodes = nodes;
+    const activating = pct != null && pct > 0 && node.status === 'pending';
+    const optimistic: Goal = {
+      ...node,
+      progressPct: pct,
+      status: activating ? 'active' : node.status,
+      actualStartDate:
+        activating && node.actualStartDate == null ? today : node.actualStartDate,
+    };
+    setNode(optimistic);
+    setNodes((current) => current.map((item) => (item.id === node.id ? optimistic : item)));
+    void saveGoalProgress(node.id, pct)
+      .then((goals) => {
+        const byId = new Map(goals.map((goal) => [goal.id, goal]));
+        setNodes((current) => current.map((item) => byId.get(item.id) ?? item));
+        setNode((current) => (current ? (byId.get(current.id) ?? current) : current));
+      })
+      .catch((error) => {
+        console.warn('Failed to save progress', error);
+        setNode(previousNode);
+        setNodes(previousNodes);
+        Alert.alert(
+          'Could not save',
+          error instanceof Error ? error.message : 'Progress was not saved.',
+        );
+      });
+  };
+
   const canAddStep = !readOnly && !isRepeating(node);
   const breakIntoSteps = !readOnly && isRepeating(node) && children.length === 0;
   const addPlaceholder =
@@ -986,8 +1077,13 @@ export default function GoalScreen({ navigation, route }: Props) {
           />
         ) : null}
 
+        {showProgress && children.length === 0 ? (
+          <View style={styles.paddedCard}>{progressControl}</View>
+        ) : null}
+
         {!editing && deal ? (
           <View style={styles.analysisCard}>
+            {showProgress ? progressControl : null}
             <Text style={styles.dealHeadline}>{deal.headline}</Text>
             <Text style={[styles.analysisDetail, { color: TONE_COLOR[deal.tone] }]}>
               {deal.detail}
@@ -1002,7 +1098,21 @@ export default function GoalScreen({ navigation, route }: Props) {
                 ]}
               />
             </View>
-            {nextUp ? (
+            {needsNextStep(node, nodes) ? (
+              <View style={styles.nextUp}>
+                <Text style={styles.stepTitle}>{NEXT_STEP_MESSAGE}</Text>
+                {readOnly ? null : (
+                  <NextStepActions
+                    onAddStep={() => addInputRef.current?.focus()}
+                    onMarkDone={() => {
+                      if (node.status !== 'done') {
+                        completeOneTime();
+                      }
+                    }}
+                  />
+                )}
+              </View>
+            ) : nextUp ? (
               <Pressable
                 onPress={() => openGoal(nextUp.id)}
                 style={({ pressed }) => [styles.nextUp, pressed && styles.pressed]}
@@ -1130,6 +1240,28 @@ export default function GoalScreen({ navigation, route }: Props) {
           />
         ) : null}
       </ScrollView>
+
+      <ProgressSheet
+        visible={progressOpen && !readOnly}
+        title={node.title}
+        initialPct={node.progressPct ?? 0}
+        showClearEstimate={children.length > 0 && node.progressPct != null}
+        onSave={(pct) => {
+          setProgressOpen(false);
+          persistProgress(pct);
+        }}
+        onMarkDone={() => {
+          setProgressOpen(false);
+          if (node.status !== 'done') {
+            completeOneTime();
+          }
+        }}
+        onClearEstimate={() => {
+          setProgressOpen(false);
+          persistProgress(null);
+        }}
+        onCancel={() => setProgressOpen(false)}
+      />
 
       <Modal visible={logOpen} animationType="fade" transparent onRequestClose={closeLog}>
         <KeyboardSafe style={styles.modalOverlay} keyboardVerticalOffset={0}>
@@ -1850,6 +1982,25 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 16,
     gap: 8,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  progressCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  progressTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#1C1C1E',
+  },
+  progressValue: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1C1C1E',
   },
   sectionLabel: {
     fontSize: 13,

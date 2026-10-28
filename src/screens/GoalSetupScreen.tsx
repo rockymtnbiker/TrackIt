@@ -189,6 +189,7 @@ function probe(
     createdDate: todayLocal(),
     reminderTime: null,
     starterKey: null,
+    progressPct: null,
     ...fields,
   };
 }

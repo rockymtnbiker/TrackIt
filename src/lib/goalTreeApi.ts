@@ -15,7 +15,7 @@ import {
 import { toDateString } from '../utils/date';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
 import { normalizeClock } from './clock';
-import { goalStartDate, isRepeating, storedTimesPerDay } from './goalTree';
+import { goalStartDate, isRepeating, isTracked, storedTimesPerDay } from './goalTree';
 import { getActiveSettings } from './settingsApi';
 import { captureStatusDates } from './statusDates';
 import { awardBadges } from './badgeCelebration';
@@ -45,6 +45,7 @@ type GoalRow = {
   times_per_day?: number | string | null;
   reminder_time?: string | null;
   starter_key?: string | null;
+  progress_pct?: number | string | null;
 };
 
 export type GoalInput = {
@@ -65,6 +66,7 @@ export type GoalInput = {
   timesPerDay?: number | null;
   reminderTime?: string | null;
   starterKey?: string | null;
+  progressPct?: number | null;
 };
 
 export type GoalUpdates = Partial<
@@ -146,7 +148,16 @@ function mapRowToNode(row: GoalRow): Goal {
     timesPerDay: storedTimesPerDay(amountToNumber(row.times_per_day) ?? null),
     reminderTime: normalizeClock(row.reminder_time),
     starterKey: blankToNull(row.starter_key),
+    progressPct: mapProgressPct(row.progress_pct),
   };
+}
+
+function mapProgressPct(value: number | string | null | undefined): number | null {
+  const amount = amountToNumber(value);
+  if (amount == null) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, Math.round(amount)));
 }
 
 function refreshReminders(): void {
@@ -615,6 +626,9 @@ export async function updateGoal(
   if (updates.reminderTime !== undefined) {
     row.reminder_time = normalizeClock(updates.reminderTime);
   }
+  if (updates.progressPct !== undefined) {
+    row.progress_pct = mapProgressPct(updates.progressPct);
+  }
 
   const touchesRepeat =
     updates.plannedDays !== undefined || updates.repeatPeriod !== undefined;
@@ -684,6 +698,10 @@ export async function setGoalStatus(
   const updates = captureStatusDates(status, existing, today, endDate);
   const fillStart = updates.actual_start_date ?? null;
   delete updates.actual_start_date;
+  const payload: Record<string, string | number | null> = { ...updates };
+  if (status === 'done' && !isRepeating(mapRowToNode(existing))) {
+    payload.progress_pct = 100;
+  }
 
   if (fillStart) {
     const { error: startError } = await supabase
@@ -701,7 +719,7 @@ export async function setGoalStatus(
 
   const { data, error } = await supabase
     .from(GOALS_TABLE)
-    .update(updates)
+    .update(payload)
     .eq('id', id)
     .eq('user_id', userId)
     .is('deleted_at', null)
@@ -843,6 +861,50 @@ async function activatePendingOnLog(
   }
 
   return changed;
+}
+
+/**
+ * Save one-time progress. Null clears a parent's estimate.
+ * A percent above 0 activates a Pending step the same way the first log does.
+ * Returns the saved goal plus any ancestors that became Active.
+ */
+export async function saveGoalProgress(
+  id: string,
+  progressPct: number | null,
+): Promise<Goal[]> {
+  const userId = await requireUserId();
+  const existing = await fetchNodeRow(id, userId);
+  if (!existing) {
+    throw new Error('Step not found.');
+  }
+  const node = mapRowToNode(existing);
+  if (isRepeating(node) || isTracked(node)) {
+    throw new Error('This step does not use a progress percent.');
+  }
+
+  const pct = mapProgressPct(progressPct);
+  const { data, error } = await supabase
+    .from(GOALS_TABLE)
+    .update({ progress_pct: pct })
+    .eq('id', id)
+    .eq('user_id', userId)
+    .is('deleted_at', null)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const saved = mapRowToNode(data as GoalRow);
+  const changed = new Map<string, Goal>([[saved.id, saved]]);
+  if (pct != null && pct > 0) {
+    const activated = await activatePendingOnLog(id, todayLocal(), userId);
+    for (const goal of activated) {
+      changed.set(goal.id, goal);
+    }
+  }
+  return [...changed.values()];
 }
 
 /** Insert one log. A second row for the same day is a new session, not an update. */

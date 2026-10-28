@@ -40,6 +40,8 @@ export type Goal = {
   reminderTime: string | null;
   /** Starter that prefilled this goal, or null when it was written by hand. */
   starterKey: string | null;
+  /** One-time progress, 0–100. Null when unset. Repeating steps leave this null. */
+  progressPct: number | null;
   /** Oldest first. Absent until the goal tree has been loaded. */
   targetHistory?: GoalTarget[];
 };

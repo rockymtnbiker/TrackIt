@@ -76,6 +76,8 @@ import {
   yesNoLogAction,
 } from '../lib/goalTree';
 import type { WeekStart } from '../lib/settingsApi';
+import { pastDueStatus } from '../lib/statusMessages';
+import { STATUS_COLORS } from '../constants';
 import { TIP_DO_LOG, TIP_DO_OPEN_GOAL, dismissTip, getDismissedTips } from '../lib/tips';
 import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
 import {
@@ -426,7 +428,7 @@ function detailSubtitle(
     const overdue = !done && isPastDate(step.targetEndDate, asOf);
     if (overdue) {
       return {
-        text: `Overdue · ${formatShortDate(step.targetEndDate)}`,
+        text: pastDueStatus().message,
         overdue: true,
       };
     }
@@ -3046,7 +3048,7 @@ const styles = StyleSheet.create({
     color: '#6B6B70',
   },
   subtitleOverdue: {
-    color: '#C2410C',
+    color: STATUS_COLORS.encourage,
     fontWeight: '500',
   },
   streakText: {

@@ -2,7 +2,15 @@ import type { Goal, GoalEntry } from '../types/goal';
 import { parseLocalDate, toLocalDateString } from './localDate';
 import { addDays, formatShortDate } from '../utils/date';
 import type { WeekStart } from './settingsApi';
-import { endOfWeek, startOfWeek, weekdayName } from './week';
+import {
+  behindStatus,
+  doneStatus,
+  onTrackStatus,
+  pastDueStatus,
+  weekCompleteStatus,
+  type StatusCopy,
+} from './statusMessages';
+import { endOfWeek, startOfWeek } from './week';
 import { calculateStreak, longestStreak, metWeekStreak } from '../utils/streak';
 import { entriesOnOrBefore, periodTotalAsOf } from './asOfDate';
 import {
@@ -18,7 +26,7 @@ import {
   weekTargetFor,
 } from './goalTree';
 
-export type AnalysisTone = 'good' | 'warn' | 'neutral';
+export type AnalysisTone = 'good' | 'encourage' | 'warn' | 'neutral';
 
 export type GoalAnalysis = {
   headline: string;
@@ -48,6 +56,28 @@ function formatQty(value: number): string {
 
 function dayWord(count: number): string {
   return count === 1 ? 'day' : 'days';
+}
+
+function withStatus(status: StatusCopy, detail: string): GoalAnalysis {
+  return {
+    headline: status.message,
+    detail,
+    tone: status.tone === 'positive' ? 'good' : 'encourage',
+  };
+}
+
+function hasLogThisWeek(
+  node: Goal,
+  entries: GoalEntry[],
+  today: string,
+  weekStartsOn: WeekStart,
+): boolean {
+  const weekStart = startOfWeek(today, weekStartsOn);
+  const weekEnd = endOfWeek(weekStart, weekStartsOn);
+  return entriesOnOrBefore(entries, today).some((entry) => {
+    const date = entry.entryDate.slice(0, 10);
+    return entry.goalId === node.id && date >= weekStart && date <= weekEnd;
+  });
 }
 
 function dateKey(date: Date): string {
@@ -137,48 +167,31 @@ function weeklyAnalysis(
     sixWeekAverage(node, entries, today, weekStartsOn),
   );
   if (total >= target) {
-    return { headline: 'Week complete', detail: stats, tone: 'good' };
+    return withStatus(weekCompleteStatus(), stats);
   }
 
   const span = availableDays.length;
   const elapsed = availableDays.filter((day) => dateKey(day) <= today).length;
   const expected = span > 0 ? (target * elapsed) / span : 0;
   if (total >= expected) {
-    return { headline: 'On pace this week', detail: stats, tone: 'good' };
+    return withStatus(onTrackStatus(), stats);
   }
 
   const remaining = target - total;
   const daysLeft = availableDays.filter((day) => dateKey(day) >= today).length;
   const cantFinish = isDaily(view) && !isTracked(node) && remaining > daysLeft;
-  if (cantFinish) {
-    return { headline: "Can't finish this week", detail: stats, tone: 'warn' };
-  }
-
-  return {
-    headline: 'Behind this week',
-    detail: `Needs ${formatQty(remaining)} more by ${weekdayName(endOfWeek(today, weekStartsOn))} · ${stats}`,
-    tone: 'warn',
-  };
+  const started = hasLogThisWeek(node, entries, today, weekStartsOn);
+  return withStatus(behindStatus(started, !cantFinish), stats);
 }
 
 function oneTimeAnalysis(node: Goal, today: string): GoalAnalysis {
-  const completed = node.actualEndDate?.slice(0, 10) || null;
   if (node.status === 'done') {
-    return {
-      headline: completed ? `Done on ${formatShortDate(completed)}` : 'Done',
-      detail: '',
-      tone: 'good',
-    };
+    return withStatus(doneStatus(), '');
   }
 
   const deadline = node.targetEndDate?.slice(0, 10) || null;
   if (deadline && deadline < today) {
-    const overdue = daysBetween(deadline, today);
-    return {
-      headline: `Overdue by ${overdue} ${dayWord(overdue)}`,
-      detail: '',
-      tone: 'warn',
-    };
+    return withStatus(pastDueStatus(), '');
   }
   if (deadline) {
     const left = daysBetween(today, deadline);
@@ -365,7 +378,7 @@ export function bigDealSummary(
   if (complete) {
     detail = 'All steps done';
   } else if (overdue > 0) {
-    detail = `${overdue} ${overdue === 1 ? 'step' : 'steps'} overdue`;
+    detail = '';
     tone = 'warn';
   }
 

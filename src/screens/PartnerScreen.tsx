@@ -16,6 +16,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { STATUS_COLORS } from '../constants';
 import { useSettings } from '../context/SettingsContext';
 import { periodTotalAsOf } from '../lib/asOfDate';
 import {
@@ -52,7 +53,8 @@ import { toDateString } from '../utils/date';
 type Props = NativeStackScreenProps<CommunityStackParamList, 'Partner'>;
 
 const TONE_COLOR: Record<AnalysisTone, string> = {
-  good: '#248A3D',
+  good: STATUS_COLORS.positive,
+  encourage: STATUS_COLORS.encourage,
   warn: '#C2410C',
   neutral: '#1C1C1E',
 };

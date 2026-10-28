@@ -15,8 +15,10 @@ import {
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { DatePickerModal } from '../components/DatePickerModal';
 import { CommentsEntry } from '../components/CommentsEntry';
-import { DEFAULT_DRAGGABLE_ITEM_HEIGHT, DraggableItem } from '../components/DraggableItem';
+import { BlockRowPress, DEFAULT_DRAGGABLE_ITEM_HEIGHT, DraggableItem } from '../components/DraggableItem';
+import { StatusLine } from '../components/StatusLine';
 import GoalDetailCards from '../components/GoalDetailCards';
 import GoalEditForm, { type GoalEditFormHandle } from '../components/GoalEditForm';
 import { NEXT_STEP_MESSAGE, NextStepActions } from '../components/NextStepPrompt';
@@ -46,6 +48,7 @@ import {
   reorderGoals,
   saveGoalProgress,
   setGoalStatus,
+  updateGoal,
   type UpsertedEntry,
 } from '../lib/goalTreeApi';
 import {
@@ -76,7 +79,10 @@ import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { Goal, GoalEntry, GoalStatus } from '../types/goal';
 import type { WeekStart } from '../lib/settingsApi';
 import { startOfWeek, weekDays } from '../lib/week';
-import { toLocalDateString, todayLocal } from '../lib/localDate';
+import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
+import { DETAIL_LABELS } from '../lib/goalDetailText';
+import { pastDueStatus } from '../lib/statusMessages';
+import { STATUS_COLORS } from '../constants';
 import { formatDate, formatShortDate, isPastDate } from '../utils/date';
 import { GoalReadout } from './StepDetailScreen';
 
@@ -89,7 +95,8 @@ const STATUS_LABEL: Record<GoalStatus, string> = {
 };
 
 const TONE_COLOR: Record<AnalysisTone, string> = {
-  good: '#248A3D',
+  good: STATUS_COLORS.positive,
+  encourage: STATUS_COLORS.encourage,
   warn: '#C2410C',
   neutral: '#1C1C1E',
 };
@@ -159,7 +166,7 @@ function overdueLine(step: Goal, today: string): string | null {
   if (!end || step.status === 'done' || !isPastDate(end, today)) {
     return null;
   }
-  return `Overdue · ${formatShortDate(end)}`;
+  return pastDueStatus().message;
 }
 
 function reorderErrorMessage(error: unknown): string {
@@ -233,6 +240,7 @@ type StepSiblingListProps = {
   today: string;
   readOnly: boolean;
   onOpen: (id: string) => void;
+  onSetTargetDate?: (goal: Goal) => void;
   onReorder: (parentId: string, from: number, to: number) => void;
 };
 
@@ -246,6 +254,7 @@ function StepSiblingList({
   today,
   readOnly,
   onOpen,
+  onSetTargetDate,
   onReorder,
 }: StepSiblingListProps) {
   const siblings = childrenMap.get(parentId) ?? [];
@@ -288,7 +297,20 @@ function StepSiblingList({
                 {goal.title || 'Untitled'}
               </Text>
               {row.leaf ? (
-                overdue ? <Text style={styles.overdue}>{overdue}</Text> : null
+                overdue ? (
+                  onSetTargetDate ? (
+                    <BlockRowPress onPress={() => onSetTargetDate(goal)}>
+                      <StatusLine
+                        message={overdue}
+                        tone="encourage"
+                        emphasizeLink
+                        style={styles.overdue}
+                      />
+                    </BlockRowPress>
+                  ) : (
+                    <StatusLine message={overdue} tone="encourage" style={styles.overdue} />
+                  )
+                ) : null
               ) : (
                 <Text style={styles.treeCount}>
                   {row.done} of {row.total} steps
@@ -313,6 +335,7 @@ function StepSiblingList({
               today={today}
               readOnly={readOnly}
               onOpen={onOpen}
+              onSetTargetDate={onSetTargetDate}
               onReorder={onReorder}
             />
           ) : null;
@@ -419,6 +442,7 @@ export default function GoalScreen({ navigation, route }: Props) {
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [saving, setSaving] = useState(false);
+  const [targetDateFor, setTargetDateFor] = useState<Goal | null>(null);
   const entryBusy = useRef(false);
   const addInputRef = useRef<TextInputInstance>(null);
   const focusAddRef = useRef(false);
@@ -456,6 +480,38 @@ export default function GoalScreen({ navigation, route }: Props) {
       setLoading(false);
     }
   }, [goalId, ownerId, readOnly]);
+
+  const openTargetDate = useCallback(
+    (goal: Goal) => {
+      if (readOnly) {
+        return;
+      }
+      setTargetDateFor(goal);
+    },
+    [readOnly],
+  );
+
+  const confirmTargetDate = (date: Date) => {
+    const goal = targetDateFor;
+    setTargetDateFor(null);
+    if (!goal || readOnly) {
+      return;
+    }
+    void updateGoal(goal.id, { targetEndDate: toLocalDateString(date) })
+      .then((updated) => {
+        setNodes((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+        setNode((current) => (current?.id === updated.id ? updated : current));
+        setChildren((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        );
+      })
+      .catch((error) => {
+        Alert.alert(
+          'Could not save the target date',
+          error instanceof Error ? error.message : 'Could not save the target date.',
+        );
+      });
+  };
 
   const openGoal = useCallback(
     (id: string) => {
@@ -1085,9 +1141,11 @@ export default function GoalScreen({ navigation, route }: Props) {
           <View style={styles.analysisCard}>
             {showProgress ? progressControl : null}
             <Text style={styles.dealHeadline}>{deal.headline}</Text>
-            <Text style={[styles.analysisDetail, { color: TONE_COLOR[deal.tone] }]}>
-              {deal.detail}
-            </Text>
+            {deal.detail ? (
+              <Text style={[styles.analysisDetail, { color: TONE_COLOR[deal.tone] }]}>
+                {deal.detail}
+              </Text>
+            ) : null}
             <View style={styles.dealTrack}>
               <View
                 style={[
@@ -1154,6 +1212,7 @@ export default function GoalScreen({ navigation, route }: Props) {
                     : null
             }
             canLog={!readOnly}
+            onSetTargetDate={readOnly ? undefined : () => openTargetDate(node)}
             onPress={() => {
               if (isTracked(node)) {
                 openLog();
@@ -1181,7 +1240,10 @@ export default function GoalScreen({ navigation, route }: Props) {
                   <OneTimeMark status={node.status} />
                 </Pressable>
               )}
-              <AnalysisCopy analysis={analysis} />
+              <AnalysisCopy
+                analysis={analysis}
+                onSetTargetDate={readOnly ? undefined : () => openTargetDate(node)}
+              />
             </View>
           </View>
         ) : null}
@@ -1204,7 +1266,14 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {!editing ? <GoalReadout node={node} nodes={nodes} entries={entries} /> : null}
+        {!editing ? (
+          <GoalReadout
+            node={node}
+            nodes={nodes}
+            entries={entries}
+            onSetTargetDate={readOnly ? undefined : () => openTargetDate(node)}
+          />
+        ) : null}
 
         {!editing && tree.length > 0 ? (
           <View style={styles.treeCard}>
@@ -1218,6 +1287,7 @@ export default function GoalScreen({ navigation, route }: Props) {
               today={today}
               readOnly={readOnly}
               onOpen={openGoal}
+              onSetTargetDate={readOnly ? undefined : openTargetDate}
               onReorder={reorderSiblings}
             />
             {canAddStep ? <View style={styles.treeAdd}>{stepAddField}</View> : null}
@@ -1313,6 +1383,18 @@ export default function GoalScreen({ navigation, route }: Props) {
           </Pressable>
         </KeyboardSafe>
       </Modal>
+      {targetDateFor ? (
+        <DatePickerModal
+          title={DETAIL_LABELS.targetEnd}
+          value={
+            targetDateFor.targetEndDate
+              ? parseLocalDate(targetDateFor.targetEndDate.slice(0, 10))
+              : null
+          }
+          onCancel={() => setTargetDateFor(null)}
+          onConfirm={confirmTargetDate}
+        />
+      ) : null}
     </KeyboardSafe>
   );
 }
@@ -1459,14 +1541,27 @@ function OneTimeMark({ status }: { status: GoalStatus }) {
 
 function AnalysisCopy({
   analysis,
+  onSetTargetDate,
 }: {
   analysis: { headline: string; detail: string; tone: AnalysisTone };
+  onSetTargetDate?: () => void;
 }) {
+  const statusTone =
+    analysis.tone === 'good' ? 'positive' : analysis.tone === 'encourage' ? 'encourage' : null;
   return (
     <View style={styles.analysisCopy}>
-      <Text style={[styles.headline, { color: TONE_COLOR[analysis.tone] }]}>
-        {analysis.headline}
-      </Text>
+      {statusTone ? (
+        <StatusLine
+          message={analysis.headline}
+          tone={statusTone}
+          onSetTargetDate={onSetTargetDate}
+          style={styles.headline}
+        />
+      ) : (
+        <Text style={[styles.headline, { color: TONE_COLOR[analysis.tone] }]}>
+          {analysis.headline}
+        </Text>
+      )}
       {analysis.detail ? <Text style={styles.analysisDetail}>{analysis.detail}</Text> : null}
     </View>
   );
@@ -1553,6 +1648,7 @@ function WeeklyAnalysis({
   loggedToday,
   doseLabel = null,
   canLog = true,
+  onSetTargetDate,
   onPress,
 }: {
   node: Goal;
@@ -1562,6 +1658,7 @@ function WeeklyAnalysis({
   loggedToday: boolean;
   doseLabel?: string | null;
   canLog?: boolean;
+  onSetTargetDate?: () => void;
   onPress: () => void;
 }) {
   const { settings } = useSettings();
@@ -1576,7 +1673,7 @@ function WeeklyAnalysis({
           tracked={isTracked(node)}
           loggedToday={loggedToday}
         />
-        <AnalysisCopy analysis={analysis} />
+        <AnalysisCopy analysis={analysis} onSetTargetDate={onSetTargetDate} />
       </View>
       <WeekStrip node={node} entries={entries} today={today} />
       {canLog ? (
@@ -1774,7 +1871,7 @@ const styles = StyleSheet.create({
   overdue: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#c2410c',
+    color: STATUS_COLORS.encourage,
   },
   addInput: {
     fontSize: 17,

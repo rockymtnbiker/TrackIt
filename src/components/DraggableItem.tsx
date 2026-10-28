@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode, type RefObject } from 'react';
-import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
@@ -180,11 +180,49 @@ export function DraggableItem({
   );
 }
 
+/** Tap target that wins over the row tap, so a nested link can open on its own. */
+export function BlockRowPress({
+  onPress,
+  children,
+}: {
+  onPress: () => void;
+  children: ReactNode;
+}) {
+  const outer = useContext(OuterDragContext);
+  const onPressRef = useRef(onPress);
+  onPressRef.current = onPress;
+
+  const gesture = useMemo(() => {
+    const tap = Gesture.Tap()
+      .runOnJS(true)
+      .onEnd(() => {
+        onPressRef.current();
+      });
+    if (outer) {
+      tap.blocksExternalGesture(outer.pan, outer.tap);
+    }
+    return tap;
+    // Parent gesture refs stay current; onPress is read from a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outer]);
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <View collapsable={false} style={styles.linkHit} accessibilityRole="button">
+        {children}
+      </View>
+    </GestureDetector>
+  );
+}
+
 const styles = StyleSheet.create({
   base: {
     position: 'relative',
     shadowColor: '#000',
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
+  },
+  linkHit: {
+    alignSelf: 'flex-start',
   },
 });

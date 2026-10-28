@@ -28,6 +28,7 @@ import { KeyboardSafe } from '../components/KeyboardSafe';
 import { confirmDeleteGoal, descendantIds } from '../lib/goalDeleteConfirm';
 import { PendingStatusCircle } from '../components/PendingStatusCircle';
 import { ProgressLineChart } from '../components/ProgressLineChart';
+import { StatusLine } from '../components/StatusLine';
 import { UNIT_OPTIONS } from '../constants';
 import {
   createGoal,
@@ -46,6 +47,7 @@ import {
   periodTotal,
   rollupTotal,
   weekTargetFor,
+  type PaceInfo,
 } from '../lib/goalTree';
 import {
   buildProgressSeries,
@@ -66,6 +68,13 @@ import { nextGoalStatus } from '../types';
 import { endOfWeek, startOfWeek, weekdayLabels, weekdayOrder } from '../lib/week';
 import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
 import { addDays } from '../utils/date';
+import {
+  aheadStatus,
+  behindStatus,
+  onTrackStatus,
+  pastDueStatus,
+  type StatusCopy,
+} from '../lib/statusMessages';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'StepDetail'>;
 
@@ -447,7 +456,7 @@ function MetricsSections({
                 {row.met ? (
                   <Text style={styles.markMet}>✓</Text>
                 ) : row.missed ? (
-                  <Text style={styles.markMissed}>✗</Text>
+                  <Text style={styles.markMissed}>–</Text>
                 ) : (
                   <Text style={styles.markSpacer}> </Text>
                 )}
@@ -514,14 +523,35 @@ function StatusCircle({
   );
 }
 
+function paceMessageFor(
+  node: Goal,
+  total: number,
+  pace: PaceInfo,
+  today: string,
+): StatusCopy {
+  const deadline = node.targetEndDate?.slice(0, 10) || null;
+  if (node.status !== 'done' && deadline && deadline < today.slice(0, 10)) {
+    return pastDueStatus();
+  }
+  if (pace.onPace) {
+    return onTrackStatus();
+  }
+  if (pace.delta > 0) {
+    return aheadStatus(Math.round(pace.delta));
+  }
+  return behindStatus(total > 0, true);
+}
+
 export function GoalReadout({
   node,
   nodes,
   entries,
+  onSetTargetDate,
 }: {
   node: Goal;
   nodes: Goal[];
   entries: GoalEntry[];
+  onSetTargetDate?: () => void;
 }) {
   const { settings } = useSettings();
   const displayUnit = node.unit;
@@ -537,6 +567,7 @@ export function GoalReadout({
     : node.targetAmount;
   const pace =
     displayUnit && !repeatOn ? paceInfo(node, total ?? 0, today) : null;
+  const paceCopy = pace ? paceMessageFor(node, total ?? 0, pace, today) : null;
 
   return (
     <>
@@ -591,19 +622,13 @@ export function GoalReadout({
               })}
             />
           ) : null}
-          {!repeatOn && pace ? (
-            <Text
-              style={[
-                styles.paceLine,
-                pace.delta < 0 && !pace.onPace
-                  ? styles.paceBehind
-                  : styles.paceAhead,
-              ]}
-            >
-              {pace.onPace
-                ? 'On pace'
-                : `${Math.round(pace.pctDone)}% done · ${Math.round(Math.abs(pace.delta))}% ${pace.delta < 0 ? 'behind' : 'ahead'}`}
-            </Text>
+          {!repeatOn && paceCopy ? (
+            <StatusLine
+              message={paceCopy.message}
+              tone={paceCopy.tone}
+              onSetTargetDate={onSetTargetDate}
+              style={styles.paceLine}
+            />
           ) : null}
           {!repeatOn && !node.targetEndDate ? (
             <Text style={styles.hint}>Add a target end date to see your pace.</Text>
@@ -1664,12 +1689,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  paceAhead: {
-    color: '#248a3d',
-  },
-  paceBehind: {
-    color: '#b8860b',
-  },
   sectionPrompt: {
     fontSize: 15,
     fontWeight: '600',
@@ -1814,7 +1833,7 @@ const styles = StyleSheet.create({
     width: 12,
     fontSize: 10,
     textAlign: 'center',
-    color: '#c62828',
+    color: '#6B6B70',
   },
   markSpacer: {
     width: 12,

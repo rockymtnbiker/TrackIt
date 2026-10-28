@@ -17,6 +17,8 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { useSettings } from '../context/SettingsContext';
+import { STATUS_COLORS } from '../constants';
+import { toneForStatusText, getWeekProgressMessage } from '../lib/statusMessages';
 import type { WeekStart } from '../lib/settingsApi';
 import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
 import { entriesOnOrBefore, periodTotalAsOf } from '../lib/asOfDate';
@@ -65,12 +67,22 @@ type Props = NativeStackScreenProps<DashboardStackParamList, 'DashboardMain'>;
 const DONUT_SIZE = 148;
 const DONUT_STROKE = 14;
 
-function WeeklyProgressCard({ review }: { review: WeeklyReview }) {
-  const donePercent = Math.round(review.donePct * 100);
-  const partialPercent = Math.round(review.partialPct * 100);
+function WeeklyProgressCard({
+  review,
+  isCurrentWeek,
+  onSeeHelp,
+}: {
+  review: WeeklyReview;
+  isCurrentWeek: boolean;
+  onSeeHelp: () => void;
+}) {
+  const progressPercent = Math.round(review.partialPct * 100);
+  const message = getWeekProgressMessage(progressPercent, isCurrentWeek);
+  const showHelp = progressPercent === 0 && !isCurrentWeek;
   const radius = (DONUT_SIZE - DONUT_STROKE) / 2;
   const circumference = 2 * Math.PI * radius;
   const center = DONUT_SIZE / 2;
+  const progress = progressPercent / 100;
 
   return (
     <View style={styles.weeklyCard}>
@@ -89,7 +101,7 @@ function WeeklyProgressCard({ review }: { review: WeeklyReview }) {
                 strokeWidth={DONUT_STROKE}
                 fill="none"
               />
-              {donePercent > 0 ? (
+              {progressPercent > 0 ? (
                 <Circle
                   cx={center}
                   cy={center}
@@ -98,23 +110,42 @@ function WeeklyProgressCard({ review }: { review: WeeklyReview }) {
                   strokeWidth={DONUT_STROKE}
                   fill="none"
                   strokeDasharray={`${circumference} ${circumference}`}
-                  strokeDashoffset={circumference * (1 - review.donePct)}
+                  strokeDashoffset={circumference * (1 - progress)}
                   strokeLinecap="round"
                   rotation={-90}
                   origin={`${center}, ${center}`}
                 />
               ) : null}
             </Svg>
-            <Text style={styles.donutValue}>{donePercent}%</Text>
+            <Text style={styles.donutValue}>{progressPercent}%</Text>
           </View>
-          <Text style={styles.weeklyDoneCount}>
-            {review.doneCount} of {review.totalCount} done
-          </Text>
-          {partialPercent !== donePercent ? (
-            <Text style={styles.weeklyPartial}>
-              {partialPercent}% including partial progress
-            </Text>
-          ) : null}
+          <View style={styles.progressBody}>
+            <View style={styles.progressCounts}>
+              <Text style={styles.progressCount}>
+                {review.doneCount} of {review.totalCount} · Done
+              </Text>
+              {review.inProgressCount > 0 ? (
+                <Text style={styles.progressCount}>
+                  {review.inProgressCount} of {review.totalCount} · In progress
+                </Text>
+              ) : null}
+            </View>
+            <View style={styles.progressPhrase}>
+              <Text style={[styles.progressPhraseText, { color: STATUS_COLORS[message.tone] }]}>
+                {message.message}
+              </Text>
+              {showHelp ? (
+                <Pressable
+                  onPress={onSeeHelp}
+                  accessibilityRole="button"
+                  accessibilityLabel="See what can help"
+                  hitSlop={6}
+                >
+                  <Text style={styles.progressHelp}>See what can help →</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
         </>
       )}
     </View>
@@ -127,9 +158,9 @@ function formatWeekDelta(delta: number): { text: string; color: string } {
     return { text: `↑ +${points}%`, color: '#248a3d' };
   }
   if (points < 0) {
-    return { text: `↓ −${Math.abs(points)}%`, color: '#c62828' };
+    return { text: `−${Math.abs(points)}%`, color: '#6B6B70' };
   }
-  return { text: '0%', color: '#111' };
+  return { text: '0%', color: '#6B6B70' };
 }
 
 function WeekTiles({
@@ -167,7 +198,8 @@ function WeekTiles({
 }
 
 const TONE_COLOR: Record<AnalysisTone, string> = {
-  good: '#248A3D',
+  good: STATUS_COLORS.positive,
+  encourage: STATUS_COLORS.encourage,
   warn: '#C2410C',
   neutral: '#1C1C1E',
 };
@@ -225,10 +257,12 @@ function NeedsAttentionCard({
   items,
   nodes,
   onPress,
+  plainDetailColor,
 }: {
   items: AtRiskItem[];
   nodes: Goal[];
   onPress: (goalId: string) => void;
+  plainDetailColor?: string;
 }) {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   return (
@@ -240,6 +274,7 @@ function NeedsAttentionCard({
         items.map((item, index) => {
           const goal = byId.get(item.goalId);
           const why = goal ? topLevelGoal(goal, byId).why?.trim() ?? '' : '';
+          const tone = toneForStatusText(item.detail);
           return (
             <Pressable
               key={item.goalId}
@@ -266,7 +301,13 @@ function NeedsAttentionCard({
               <Text
                 style={[
                   styles.attentionDetail,
-                  attentionWarn(item.detail) && styles.attentionWarn,
+                  tone
+                    ? { color: STATUS_COLORS[tone] }
+                    : attentionWarn(item.detail)
+                      ? styles.attentionWarn
+                      : plainDetailColor
+                        ? { color: plainDetailColor }
+                        : undefined,
                 ]}
               >
                 {item.detail}
@@ -582,12 +623,12 @@ function missedThisWeek(
     if (goal == null) {
       continue;
     }
-    let detail = 'Missed';
+    let detail = '';
     if (isRepeating(goal)) {
       const { target } = weekTargetFor(goal, weekStart, weekStartsOn);
       if (target != null && target > 0) {
         const total = periodTotalAsOf(goal, entries, asOf, weekStartsOn);
-        detail = `Missed: ${formatQty(total)} of ${formatQty(target)}`;
+        detail = `${formatQty(total)} of ${formatQty(target)}`;
       }
     }
     missed.push({
@@ -907,17 +948,19 @@ export default function DashboardScreen({ navigation }: Props) {
     () => entriesOnOrBefore(displayEntries, asOf),
     [displayEntries, asOf],
   );
-  const review = useMemo(
-    () =>
-      getWeeklyItems(
-        nodes,
-        reviewEntries,
-        parseLocalDate(weekStart),
-        parseLocalDate(asOf),
-        weekStartsOn,
-      ),
-    [nodes, reviewEntries, weekStart, asOf, weekStartsOn],
-  );
+  const review = useMemo(() => {
+    const repeatingIds = new Set(
+      nodes.filter((node) => isRepeating(node)).map((node) => node.id),
+    );
+    const oneTimeEntries = activityEntries.filter((entry) => !repeatingIds.has(entry.goalId));
+    return getWeeklyItems(
+      nodes,
+      mergeEntries([reviewEntries, oneTimeEntries]),
+      parseLocalDate(weekStart),
+      parseLocalDate(asOf),
+      weekStartsOn,
+    );
+  }, [nodes, reviewEntries, activityEntries, weekStart, asOf, weekStartsOn]);
   const childrenMap = useMemo(() => buildChildrenMap(nodes), [nodes]);
   const activeGoals = useMemo(
     () =>
@@ -1082,7 +1125,13 @@ export default function DashboardScreen({ navigation }: Props) {
             </View>
             <View>
               {/* weekly metric cards go here */}
-              <WeeklyProgressCard review={review} />
+              <WeeklyProgressCard
+                review={review}
+                isCurrentWeek={weekStart === currentWeek}
+                onSeeHelp={() =>
+                  navigation.getParent<NavigationProp<RootTabParamList>>()?.navigate('Community')
+                }
+              />
             </View>
             <WeekTiles
               onPaceCount={onPaceCount}
@@ -1140,7 +1189,12 @@ export default function DashboardScreen({ navigation }: Props) {
                 </>
               )}
             </View>
-            <NeedsAttentionCard items={atRiskItems} nodes={nodes} onPress={openGoal} />
+            <NeedsAttentionCard
+              items={atRiskItems}
+              nodes={nodes}
+              onPress={openGoal}
+              plainDetailColor={weekStart === currentWeek ? undefined : '#6B6B70'}
+            />
             <View style={styles.sectionCard}>
               <Text style={styles.cardHeader}>All goals</Text>
               {activeGoals.length > 0 ? (
@@ -1432,17 +1486,35 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111',
   },
-  weeklyDoneCount: {
+  progressBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  progressCounts: {
+    flexShrink: 0,
+    gap: 4,
+  },
+  progressCount: {
     fontSize: 16,
     fontWeight: '500',
     color: '#111',
-    textAlign: 'center',
   },
-  weeklyPartial: {
-    fontSize: 13,
-    color: '#666',
-    textAlign: 'center',
+  progressPhrase: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  progressPhraseText: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  progressHelp: {
     marginTop: 4,
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#007aff',
+    textAlign: 'right',
   },
   tileRow: {
     flexDirection: 'row',

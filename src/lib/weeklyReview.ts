@@ -1,8 +1,17 @@
 import type { Goal, GoalEntry } from '../types/goal';
-import { normalizeDateOnly, parseLocalDate, toLocalDateString } from './localDate';
+import { normalizeDateOnly, parseLocalDate, todayLocal, toLocalDateString } from './localDate';
 import { addDays } from '../utils/date';
-import { buildChildrenMap, isLeaf, isRepeating, isTracked, periodTotal, weekTargetFor } from './goalTree';
+import {
+  buildChildrenMap,
+  effectivePct,
+  isLeaf,
+  isRepeating,
+  isTracked,
+  periodTotal,
+  weekTargetFor,
+} from './goalTree';
 import type { WeekStart } from './settingsApi';
+import { behindStatus, pastDueStatus } from './statusMessages';
 import { endOfWeek, startOfWeek } from './week';
 
 export type WeeklyItem = {
@@ -10,7 +19,10 @@ export type WeeklyItem = {
   title: string;
   parentTitle: string | null;
   isDone: boolean;
-  /** 0–1. Repeating weekly steps can be in between; one-time steps are only 0 or 1. */
+  /**
+   * 0–1. Repeating steps are logged / week target.
+   * Current-week one-time steps use live percent. Past weeks are 0 or 1.
+   */
   partial: number;
 };
 
@@ -18,6 +30,7 @@ export type WeeklyReview = {
   items: WeeklyItem[];
   doneCount: number;
   totalCount: number;
+  inProgressCount: number;
   donePct: number;
   partialPct: number;
 };
@@ -67,6 +80,8 @@ export function getWeeklyItems(
 ): WeeklyReview {
   const start = toLocalDateString(weekStart);
   const end = endOfWeek(start, weekStartsOn);
+  const today = todayLocal();
+  const isCurrentWeek = today >= start && today <= end;
   const cutoff = toLocalDateString(asOf ?? endOfWeekDate(start, weekStartsOn));
   const visibleEntries = entries.filter((entry) => entry.entryDate.slice(0, 10) <= cutoff);
   const childrenMap = buildChildrenMap(goals);
@@ -118,22 +133,31 @@ export function getWeeklyItems(
     }
 
     const isDone = goal.status === 'done' && !completionAfterCutoff;
+    let partial = isDone ? 1 : 0;
+    if (isCurrentWeek && !isDone) {
+      const open = goal.status === 'done' ? { ...goal, status: 'active' as const } : goal;
+      const pct = effectivePct(open, { nodes: goals, entries: visibleEntries });
+      partial = pct == null ? 0 : pct / 100;
+    }
     items.push({
       goalId: goal.id,
       title: goal.title,
       parentTitle: parentTitle(goal, byId),
       isDone,
-      partial: isDone ? 1 : 0,
+      partial,
     });
   }
 
   const totalCount = items.length;
   const doneCount = items.filter((item) => item.isDone).length;
+  const inProgressCount = items.filter(
+    (item) => !item.isDone && item.partial > 0 && item.partial < 1,
+  ).length;
   const donePct = totalCount === 0 ? 0 : doneCount / totalCount;
   const partialPct =
     totalCount === 0 ? 0 : items.reduce((sum, item) => sum + item.partial, 0) / totalCount;
 
-  return { items, doneCount, totalCount, donePct, partialPct };
+  return { items, doneCount, totalCount, inProgressCount, donePct, partialPct };
 }
 
 const WEEK_STREAK_LOOKBACK = 52;
@@ -213,15 +237,6 @@ function daysBetween(start: string, end: string): number {
   return Math.round(ms / 86_400_000);
 }
 
-function formatQty(value: number): string {
-  const rounded = Math.round(value * 100) / 100;
-  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
-}
-
-function dayCountLabel(days: number): string {
-  return `${days} ${days === 1 ? 'day' : 'days'}`;
-}
-
 /**
  * Not-done weekly steps that can no longer be finished at a normal pace.
  * Overdue one-time steps and repeating steps that cannot finish this week
@@ -274,14 +289,15 @@ export function getAtRiskItems(
       if (!cantFinish && requiredRate <= AT_RISK_RATE * normalRate) {
         continue;
       }
-      const amountLabel = isTracked(goal)
-        ? `${formatQty(remaining)} ${goal.unit} left · ${dayCountLabel(daysLeft)}`
-        : `${formatQty(remaining)} ${remaining === 1 ? 'time' : 'times'} left · ${dayCountLabel(daysLeft)}`;
+      const started = visibleEntries.some((entry) => {
+        const date = entry.entryDate.slice(0, 10);
+        return entry.goalId === goal.id && date >= weekStart && date <= todayString;
+      });
       ranked.push({
         goalId: goal.id,
         title: item.title,
         parentTitle: item.parentTitle,
-        detail: cantFinish ? "can't finish this week" : amountLabel,
+        detail: behindStatus(started, !cantFinish).message,
         group: cantFinish ? 1 : 2,
         severity,
       });
@@ -306,7 +322,7 @@ export function getAtRiskItems(
       title: item.title,
       parentTitle: item.parentTitle,
       detail: overdue
-        ? 'overdue'
+        ? pastDueStatus().message
         : `due ${WEEKDAY_LABELS[parseLocalDate(deadline).getDay()]}`,
       group: overdue ? 0 : 2,
       severity: overdue ? -daysUntil : 1.5 + (2 - daysUntil) * 0.5,

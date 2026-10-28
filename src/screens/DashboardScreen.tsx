@@ -119,30 +119,34 @@ function WeeklyProgressCard({
             </Svg>
             <Text style={styles.donutValue}>{progressPercent}%</Text>
           </View>
-          <View style={styles.progressBody}>
+          <View style={styles.progressBelow}>
+            <Text style={[styles.progressPhraseText, { color: STATUS_COLORS[message.tone] }]}>
+              {message.message}
+            </Text>
+            {showHelp ? (
+              <Pressable
+                onPress={onSeeHelp}
+                accessibilityRole="button"
+                accessibilityLabel="See what can help"
+                hitSlop={6}
+                style={styles.progressHelpHit}
+              >
+                <Text style={styles.progressHelp}>See what can help →</Text>
+              </Pressable>
+            ) : null}
             <View style={styles.progressCounts}>
-              <Text style={styles.progressCount}>
-                {review.doneCount} of {review.totalCount} · Done
-              </Text>
+              <View style={styles.progressCountGroup}>
+                <Text style={styles.progressCount}>
+                  {review.doneCount} of {review.totalCount} Done
+                </Text>
+                {review.inProgressCount > 0 ? (
+                  <Text style={styles.progressCount}>{'  ·  '}</Text>
+                ) : null}
+              </View>
               {review.inProgressCount > 0 ? (
                 <Text style={styles.progressCount}>
-                  {review.inProgressCount} of {review.totalCount} · In progress
+                  {review.inProgressCount} of {review.totalCount} In progress
                 </Text>
-              ) : null}
-            </View>
-            <View style={styles.progressPhrase}>
-              <Text style={[styles.progressPhraseText, { color: STATUS_COLORS[message.tone] }]}>
-                {message.message}
-              </Text>
-              {showHelp ? (
-                <Pressable
-                  onPress={onSeeHelp}
-                  accessibilityRole="button"
-                  accessibilityLabel="See what can help"
-                  hitSlop={6}
-                >
-                  <Text style={styles.progressHelp}>See what can help →</Text>
-                </Pressable>
               ) : null}
             </View>
           </View>
@@ -1478,7 +1482,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
   },
   donutValue: {
     position: 'absolute',
@@ -1486,35 +1489,41 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111',
   },
-  progressBody: {
-    flexDirection: 'row',
+  progressBelow: {
     alignItems: 'center',
-    gap: 12,
-  },
-  progressCounts: {
-    flexShrink: 0,
-    gap: 4,
-  },
-  progressCount: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#111',
-  },
-  progressPhrase: {
-    flex: 1,
-    alignItems: 'flex-end',
+    marginTop: 8,
   },
   progressPhraseText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    textAlign: 'right',
+    textAlign: 'center',
+  },
+  progressHelpHit: {
+    marginTop: 2,
   },
   progressHelp: {
-    marginTop: 4,
     fontSize: 13,
     fontWeight: '500',
     color: '#007aff',
-    textAlign: 'right',
+    textAlign: 'center',
+  },
+  progressCounts: {
+    marginTop: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    maxWidth: '100%',
+  },
+  progressCountGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressCount: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: '#6B6B70',
+    textAlign: 'center',
   },
   tileRow: {
     flexDirection: 'row',

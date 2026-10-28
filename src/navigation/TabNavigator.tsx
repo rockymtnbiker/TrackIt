@@ -8,6 +8,7 @@ import { CommunityProvider, useCommunity } from '../context/CommunityContext';
 import CommentThreadScreen from '../screens/CommentThreadScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import GoalScreen from '../screens/GoalScreen';
+import GoalSetupScreen from '../screens/GoalSetupScreen';
 import TodayScreen from '../screens/TodayScreen';
 import CommunityStackNavigator from './CommunityStackNavigator';
 import GoalsStackNavigator, {
@@ -44,6 +45,11 @@ function TodayStackNavigator() {
         name="TodayMain"
         component={TodayScreen}
         options={{ headerShown: false, title: 'Do', headerBackTitle: 'Do' }}
+      />
+      <TodayStack.Screen
+        name="GoalSetup"
+        component={GoalSetupScreen}
+        options={{ title: 'Step 1 of 3', headerTitleAlign: 'center' }}
       />
       <TodayStack.Screen
         name="Goal"

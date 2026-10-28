@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { FormFieldRow, FormInlineInput } from '../components/FormFields';
+import { PageHeader } from '../components/PageHeader';
 import { FeedbackSheet } from '../components/FeedbackSheet';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { SupportRequestSheet } from '../components/SupportRequestSheet';
@@ -186,6 +187,21 @@ export default function CommunityScreen({ navigation }: Props) {
 
   return (
     <View style={styles.screen}>
+      <PageHeader
+        title="Connect"
+        subtitle="Partners, help, and what's coming"
+        right={
+          <Pressable
+            onPress={() => navigation.navigate('Profile')}
+            accessibilityRole="button"
+            accessibilityLabel="Profile"
+            hitSlop={8}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <Ionicons name="person-circle" size={28} color="#111" />
+          </Pressable>
+        }
+      />
       <ScrollView
         style={styles.screen}
         contentContainerStyle={styles.content}

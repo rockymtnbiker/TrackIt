@@ -20,9 +20,14 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
+import {
+  FLOATING_ADD_BUTTON_CLEARANCE,
+  FLOATING_ADD_BUTTON_SIZE,
+  FloatingAddButton,
+} from '../components/FloatingAddButton';
 import { KeyboardSafe } from '../components/KeyboardSafe';
+import { PageHeader } from '../components/PageHeader';
 import { showActionSheet } from '../components/showActionSheet';
 import { useSettings } from '../context/SettingsContext';
 import {
@@ -1816,37 +1821,49 @@ export default function TodayScreen() {
     ? nodes.find((node) => node.id === logStepId) ?? null
     : null;
 
+  const openCreate = () => {
+    navigation.navigate('GoalSetup');
+  };
+
   if (loading && nodes.length === 0) {
     return (
-      <SafeAreaView style={styles.loadingState} edges={['top']}>
-        <ActivityIndicator color="#007aff" />
-      </SafeAreaView>
+      <View style={styles.container}>
+        <PageHeader title="Do" subtitle="Tap a circle to log your progress" />
+        <View style={styles.loadingState}>
+          <ActivityIndicator color="#007aff" />
+        </View>
+        <FloatingAddButton onPress={openCreate} />
+      </View>
     );
   }
 
   if (loadError && nodes.length === 0) {
     return (
-      <SafeAreaView style={styles.loadingState} edges={['top']}>
-        <Text style={styles.errorText}>{loadError}</Text>
-        <Pressable
-          onPress={() => void loadTodayData(visibleWeekStart)}
-          style={({ pressed }) => [
-            styles.retryButton,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </Pressable>
-      </SafeAreaView>
+      <View style={styles.container}>
+        <PageHeader title="Do" subtitle="Tap a circle to log your progress" />
+        <View style={styles.loadingState}>
+          <Text style={styles.errorText}>{loadError}</Text>
+          <Pressable
+            onPress={() => void loadTodayData(visibleWeekStart)}
+            style={({ pressed }) => [
+              styles.retryButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </Pressable>
+        </View>
+        <FloatingAddButton onPress={openCreate} />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView
+    <View
       style={styles.container}
-      edges={['top']}
       onStartShouldSetResponderCapture={clearHighlightOnTouch}
     >
+    <PageHeader title="Do" subtitle="Tap a circle to log your progress" />
     <View ref={scrollHostRef} style={styles.container}>
     <ScrollView
       ref={scrollRef}
@@ -2086,6 +2103,7 @@ export default function TodayScreen() {
         </View>
       )}
     </ScrollView>
+      <FloatingAddButton onPress={openCreate} />
       {cardMode ? (
         <View style={styles.createdCard}>
           <View style={styles.createdCardHeader}>
@@ -2206,7 +2224,7 @@ export default function TodayScreen() {
           </Pressable>
         </KeyboardSafe>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -2217,10 +2235,10 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingTop: 12,
-    paddingBottom: 24,
+    paddingBottom: 24 + FLOATING_ADD_BUTTON_CLEARANCE,
   },
   contentWithCard: {
-    paddingBottom: 150,
+    paddingBottom: 150 + FLOATING_ADD_BUTTON_CLEARANCE,
   },
   doRowFresh: {
     borderWidth: 2,
@@ -2249,7 +2267,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     right: 12,
-    bottom: 8,
+    bottom: 16 + FLOATING_ADD_BUTTON_SIZE + 12,
     backgroundColor: '#fff',
     borderRadius: 14,
     padding: 14,

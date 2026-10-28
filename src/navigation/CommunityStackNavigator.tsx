@@ -1,6 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Pressable } from 'react-native';
 import BlockedScreen from '../screens/BlockedScreen';
 import CommentThreadScreen from '../screens/CommentThreadScreen';
 import CommunityScreen from '../screens/CommunityScreen';
@@ -30,22 +28,11 @@ export default function CommunityStackNavigator() {
       <Stack.Screen
         name="CommunityMain"
         component={CommunityScreen}
-        options={({ navigation }) => ({
+        options={{
+          headerShown: false,
           title: 'Connect',
           headerBackTitle: 'Connect',
-          headerTitleAlign: 'center',
-          headerRight: () => (
-            <Pressable
-              onPress={() => navigation.navigate('Profile')}
-              accessibilityRole="button"
-              accessibilityLabel="Profile"
-              hitSlop={8}
-              style={({ pressed }) => pressed && { opacity: 0.55 }}
-            >
-              <Ionicons name="person-circle" size={28} color="#111" />
-            </Pressable>
-          ),
-        })}
+        }}
       />
       <Stack.Screen
         name="Learn"

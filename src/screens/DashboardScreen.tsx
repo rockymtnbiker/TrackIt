@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { PageHeader } from '../components/PageHeader';
 import { useFocusEffect, type NavigationProp } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -13,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { useSettings } from '../context/SettingsContext';
 import type { WeekStart } from '../lib/settingsApi';
@@ -1009,17 +1010,19 @@ export default function DashboardScreen({ navigation }: Props) {
 
   if (loading && nodes.length === 0) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.safeArea}>
+        <PageHeader title="Review" subtitle="See how your week went" />
         <View style={styles.loadingState}>
           <ActivityIndicator color="#007aff" />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (loadError && nodes.length === 0) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.safeArea}>
+        <PageHeader title="Review" subtitle="See how your week went" />
         <View style={styles.loadingState}>
           <Text style={styles.errorText}>{loadError}</Text>
           <Pressable
@@ -1029,12 +1032,13 @@ export default function DashboardScreen({ navigation }: Props) {
             <Text style={styles.retryButtonText}>Retry</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <View style={styles.safeArea}>
+      <PageHeader title="Review" subtitle="See how your week went" />
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <View style={styles.weekHeader}>
               <Text style={styles.weekTitle}>{reviewWeekTitle(weekStart, currentWeek)}</Text>
@@ -1313,7 +1317,7 @@ export default function DashboardScreen({ navigation }: Props) {
           }}
         />
       ) : null}
-    </SafeAreaView>
+    </View>
   );
 }
 

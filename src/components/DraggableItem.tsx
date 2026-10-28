@@ -97,6 +97,9 @@ export function DraggableItem({
     const pan = Gesture.Pan()
       .runOnJS(true)
       .activateAfterLongPress(LONG_PRESS_MS)
+      // A sideways move before the long-press activates belongs to the tab
+      // pager, not this reorder gesture.
+      .failOffsetX([-48, 48])
       .enabled(enabled)
       .onStart(() => {
         // Set immediately so zIndex/elevation kick in before the first frame.
@@ -158,7 +161,6 @@ export function DraggableItem({
       ],
       zIndex: active ? 1000 : 0,
       elevation: active ? 24 : 0,
-      position: 'relative',
       shadowOpacity: active ? 0.2 : 0.06,
     };
   });

@@ -33,6 +33,7 @@ export type GoalsStackParamList = {
 
 export type TodayStackParamList = {
   TodayMain: { focusToday?: number; freshGoalId?: string } | undefined;
+  GoalSetup: undefined;
   Goal: GoalRouteParams;
   StepDetail: { goalId: string };
   Comments: CommentThreadParams;

@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -8,9 +8,14 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Pressable, ScrollView } from 'react-native-gesture-handler';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { LegacyScrollView as ScrollView, Pressable } from 'react-native-gesture-handler';
+import { AREA_ICONS } from '../constants/areaIcons';
 import { DraggableItem } from '../components/DraggableItem';
+import {
+  FLOATING_ADD_BUTTON_CLEARANCE,
+  FloatingAddButton,
+} from '../components/FloatingAddButton';
+import { PageHeader } from '../components/PageHeader';
 import { useSettings } from '../context/SettingsContext';
 import {
   getAllGoals,
@@ -25,6 +30,8 @@ import {
   rollupTotal,
   weeklyTarget,
 } from '../lib/goalTree';
+import { todayLocal } from '../lib/localDate';
+import { planSummaryLine } from '../lib/planSummary';
 import type { WeekStart } from '../lib/settingsApi';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { GoalEntry, Goal } from '../types/goal';
@@ -104,7 +111,12 @@ export default function GoalsListScreen({ navigation }: Props) {
     }, [load]),
   );
 
+  const today = todayLocal();
   const childrenMap = useMemo(() => buildChildrenMap(nodes), [nodes]);
+  const summary = useMemo(
+    () => planSummaryLine(nodes, settings.weekStart, today),
+    [nodes, settings.weekStart, today],
+  );
   const visibleNodes = useMemo(
     () =>
       nodes
@@ -144,28 +156,23 @@ export default function GoalsListScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <View style={styles.safe}>
+      <PageHeader
+        title="Plan"
+        subtitle="Your goals and the steps to get there"
+      />
+      {summary ? <Text style={styles.summary}>{summary}</Text> : null}
+      <View style={styles.listHost}>
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
-        // The gesture-handler scroll view otherwise cancels the long-press
-        // drag as soon as the finger moves.
+        // Legacy scroll view, not the v3 one. The v3 ScrollView attaches an
+        // intercepting detector that aborts on iOS when this page is shown
+        // inside the tab pager. disallowInterruption lets the long-press
+        // drag take over once it activates.
         disallowInterruption={false}
       >
-        <View style={styles.headerRow}>
-          <Pressable
-            onPress={openCreate}
-            style={({ pressed }) => [
-              styles.addButton,
-              pressed && styles.pressed,
-            ]}
-            accessibilityLabel="Add goal"
-          >
-            <Ionicons name="add" size={32} color="#111" />
-          </Pressable>
-        </View>
-
         {loading && visibleNodes.length === 0 ? (
           <View style={styles.goalsStatus}>
             <ActivityIndicator color="#007aff" />
@@ -209,6 +216,13 @@ export default function GoalsListScreen({ navigation }: Props) {
               >
                 <View style={styles.card}>
                   <View style={styles.titleRow}>
+                    {node.category && AREA_ICONS[node.category] ? (
+                      <MaterialCommunityIcons
+                        name={AREA_ICONS[node.category]}
+                        size={18}
+                        color="#8e8e93"
+                      />
+                    ) : null}
                     <Text style={styles.cardTitle} numberOfLines={1}>
                       {node.title || 'Untitled'}
                     </Text>
@@ -229,7 +243,9 @@ export default function GoalsListScreen({ navigation }: Props) {
           ))
         )}
       </ScrollView>
-    </SafeAreaView>
+      <FloatingAddButton onPress={openCreate} />
+      </View>
+    </View>
   );
 }
 
@@ -238,22 +254,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f2f2f7',
   },
+  listHost: {
+    flex: 1,
+  },
+  summary: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    fontSize: 15,
+    lineHeight: 20,
+    color: '#3a3a3c',
+  },
   content: {
     padding: 12,
-    paddingBottom: 28,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginBottom: 10,
-  },
-  addButton: {
-    padding: 4,
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingBottom: 12 + FLOATING_ADD_BUTTON_CLEARANCE,
   },
   emptyText: {
     fontSize: 15,

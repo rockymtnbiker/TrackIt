@@ -1,4 +1,3 @@
-import * as Clipboard from 'expo-clipboard';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -66,9 +65,14 @@ export function InviteCodeSheet({
     if (!code) {
       return;
     }
-    await Clipboard.setStringAsync(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      const Clipboard = await import('expo-clipboard');
+      await Clipboard.setStringAsync(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Copy needs an updated app. Use Share invite for now.');
+    }
   };
 
   const share = () => {

@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewInstance,
   type TextInputInstance,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
@@ -422,6 +423,7 @@ function ProgressReadout({
 
 export default function GoalScreen({ navigation, route }: Props) {
   const { goalId, readOnly = false, sharedByName } = route.params;
+  const editReminder = route.params.editReminder === true && !readOnly;
   const { user } = useAuth();
   const ownerId = readOnly ? route.params.ownerId : user?.id;
   const { settings } = useSettings();
@@ -447,6 +449,9 @@ export default function GoalScreen({ navigation, route }: Props) {
   const addInputRef = useRef<TextInputInstance>(null);
   const focusAddRef = useRef(false);
   const editRef = useRef<GoalEditFormHandle>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const primedReminder = useRef(false);
+  const scrolledReminder = useRef(false);
   const allowLeaveRef = useRef(false);
   const editingRef = useRef(editing);
   editingRef.current = editing;
@@ -473,13 +478,18 @@ export default function GoalScreen({ navigation, route }: Props) {
       setNode(found);
       setEntries(nextEntries);
       setChildren(buildChildrenMap(nextNodes).get(goalId) ?? []);
+      if (found && editReminder && !primedReminder.current) {
+        primedReminder.current = true;
+        setEditTitle(found.title);
+        setEditing(true);
+      }
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Failed to load goal.');
       setNode(null);
     } finally {
       setLoading(false);
     }
-  }, [goalId, ownerId, readOnly]);
+  }, [goalId, ownerId, readOnly, editReminder]);
 
   const openTargetDate = useCallback(
     (goal: Goal) => {
@@ -1018,9 +1028,30 @@ export default function GoalScreen({ navigation, route }: Props) {
     </Pressable>
   );
 
+  const scrollReminderIntoView = () => {
+    if (!editReminder || scrolledReminder.current) {
+      return;
+    }
+    const host = editRef.current?.reminderHost();
+    const scroller = scrollRef.current;
+    const content = scroller?.getInnerViewRef() ?? null;
+    if (!host || !scroller || !content) {
+      return;
+    }
+    host.measureLayout(
+      content,
+      (_left, top) => {
+        scrolledReminder.current = true;
+        scroller.scrollTo({ y: Math.max(0, top - 12), animated: true });
+      },
+      () => {},
+    );
+  };
+
   return (
     <KeyboardSafe style={styles.container}>
       <ScrollView
+        ref={scrollRef}
         style={styles.container}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
@@ -1126,6 +1157,7 @@ export default function GoalScreen({ navigation, route }: Props) {
             goal={node}
             nodes={nodes}
             title={editTitle}
+            onReminderLayout={editReminder ? scrollReminderIntoView : undefined}
             onDeleted={() => {
               allowLeaveRef.current = true;
               navigation.goBack();

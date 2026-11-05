@@ -11,6 +11,8 @@ export type GoalRouteParams = {
   readOnly?: boolean;
   ownerId?: string;
   sharedByName?: string;
+  /** Open the goal already editing, scrolled to the Reminder row. */
+  editReminder?: boolean;
 };
 
 export type CommentThreadParams = {

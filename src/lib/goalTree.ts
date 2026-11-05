@@ -396,6 +396,75 @@ export function isPeriodTargetMet(
   return periodTotal(node, entries, date, weekStartsOn) >= target;
 }
 
+function plannedForDay(goal: Goal, date: string, weekStartsOn: WeekStart): boolean {
+  const days = goalForDate(goal, date, weekStartsOn).plannedDays;
+  if (days == null) {
+    return true;
+  }
+  return days.includes(parseLocalDate(date.slice(0, 10)).getDay());
+}
+
+/** Repeating leaves that are not done, and one-time leaves that are active. */
+function isActionableStep(goal: Goal): boolean {
+  if (isRepeating(goal)) {
+    return goal.status !== 'done';
+  }
+  return goal.status === 'active';
+}
+
+function actionableStepsUnder(
+  goalId: string,
+  childrenMap: Map<string | null, Goal[]>,
+  date: string,
+  weekStartsOn: WeekStart,
+): Goal[] {
+  const found: Goal[] = [];
+  const walk = (id: string) => {
+    for (const child of childrenMap.get(id) ?? []) {
+      if (!isLeaf(child, childrenMap)) {
+        walk(child.id);
+        continue;
+      }
+      if (isActionableStep(child) && plannedForDay(child, date, weekStartsOn)) {
+        found.push(child);
+      }
+    }
+  };
+  walk(goalId);
+  return found;
+}
+
+/**
+ * Whether this goal's work for the calendar day is already finished.
+ * Pass the goal tree so a parent can see the steps under it.
+ * Week start defaults to the active setting.
+ */
+export function isDoneForDay(
+  goal: Goal,
+  entries: GoalEntry[],
+  date: string,
+  nodes: Goal[] = [],
+  weekStartsOn: WeekStart = getActiveSettings().weekStart,
+): boolean {
+  if (goal.status === 'done') {
+    return true;
+  }
+  const childrenMap = buildChildrenMap(nodes);
+  if ((childrenMap.get(goal.id)?.length ?? 0) > 0) {
+    return actionableStepsUnder(goal.id, childrenMap, date, weekStartsOn).every((step) =>
+      isDoneForDay(step, entries, date, nodes, weekStartsOn),
+    );
+  }
+  if (!isRepeating(goal)) {
+    return false;
+  }
+  const subject = goalForDate(goal, date, weekStartsOn);
+  if (dayCount(entries, goal.id, date) >= timesPerDay(subject)) {
+    return true;
+  }
+  return isPeriodTargetMet(goal, entries, date, weekStartsOn);
+}
+
 /** Actual start date, or the created date when that is unset. Date only. */
 export function goalStartDate(node: Goal): string {
   return normalizeDateOnly(node.actualStartDate) ?? normalizeDateOnly(node.createdDate) ?? '';

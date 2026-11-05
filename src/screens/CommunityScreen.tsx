@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,7 +26,7 @@ import {
   sendPartnerInvite,
 } from '../lib/communityApi';
 import { localCalendarDay } from '../lib/localDate';
-import { getLatestSupportRequest, type SupportRequest } from '../lib/supportApi';
+import { getLatestSupportRequest, type HelpType, type SupportRequest } from '../lib/supportApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
 import type { Connection } from '../types/community';
 import { formatDate } from '../utils/date';
@@ -78,7 +78,7 @@ function isEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-export default function CommunityScreen({ navigation }: Props) {
+export default function CommunityScreen({ navigation, route }: Props) {
   const { refreshConnections } = useCommunity();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,11 +87,29 @@ export default function CommunityScreen({ navigation }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [requestHelp, setRequestHelp] = useState<HelpType | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [latestRequest, setLatestRequest] = useState<SupportRequest | null>(null);
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (route.params?.openSupport !== 'setup') {
+      return;
+    }
+    setRequestHelp('setup');
+    setRequestOpen(true);
+    navigation.setParams({ openSupport: undefined });
+  }, [navigation, route.params?.openSupport]);
+
+  useEffect(() => {
+    if (route.params?.openInvite !== true) {
+      return;
+    }
+    setInviteOpen(true);
+    navigation.setParams({ openInvite: undefined });
+  }, [navigation, route.params?.openInvite]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -218,6 +236,21 @@ export default function CommunityScreen({ navigation }: Props) {
         }
       >
         <Pressable
+          onPress={() => navigation.navigate('Maya')}
+          style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Work on a goal with Maya. Answer a few questions and find where to start."
+        >
+          <View style={styles.actionText}>
+            <Text style={styles.actionTitle}>Work on a goal with Maya</Text>
+            <Text style={styles.actionBody}>
+              Answer a few questions and find where to start.
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+        </Pressable>
+
+        <Pressable
           onPress={() => navigation.navigate('Learn')}
           style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
           accessibilityRole="button"
@@ -233,7 +266,10 @@ export default function CommunityScreen({ navigation }: Props) {
         </Pressable>
 
         <Pressable
-          onPress={() => setRequestOpen(true)}
+          onPress={() => {
+            setRequestHelp(null);
+            setRequestOpen(true);
+          }}
           style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel="Talk to someone. Get help from a real person, from setting up goals to the bigger stuff."
@@ -472,10 +508,15 @@ export default function CommunityScreen({ navigation }: Props) {
 
       {requestOpen ? (
         <SupportRequestSheet
-          onClose={() => setRequestOpen(false)}
+          initialHelpType={requestHelp}
+          onClose={() => {
+            setRequestOpen(false);
+            setRequestHelp(null);
+          }}
           onSent={(request) => {
             setLatestRequest(request);
             setRequestOpen(false);
+            setRequestHelp(null);
           }}
         />
       ) : null}

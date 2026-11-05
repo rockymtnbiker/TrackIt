@@ -7,6 +7,7 @@ import { getAllGoals, getEntries } from './goalTreeApi';
 import {
   buildChildrenMap,
   isDayComplete,
+  isDoneForDay,
   isLeaf,
   isRepeating,
   weekTargetFor,
@@ -20,13 +21,14 @@ import { normalizeDateOnly, parseLocalDate, todayLocal } from './localDate';
 import { addDays } from '../utils/date';
 
 export const DEFAULT_CHECKIN = '19:00:00';
-export const DEFAULT_REMINDER = '08:00:00';
+export const DEFAULT_REMINDER = '09:00:00';
 export const NOTIFICATION_DENIED_MESSAGE =
   'Turn on notifications for this app in iPhone Settings to get reminders.';
 
 const PROMPT_KEY = 'trackit.evening-checkin-prompted';
 const HANDLED_RESPONSE_KEY = 'trackit.last-reminder-response';
 const HORIZON_DAYS = 14;
+const PER_GOAL_HORIZON = 7;
 const MAX_PENDING = 60;
 const LOOKBACK_DAYS = 62;
 
@@ -45,6 +47,7 @@ type Note = {
   at: number;
   title: string;
   body: string;
+  identifier?: string;
 };
 
 let ticket = 0;
@@ -222,32 +225,6 @@ function oneTimeOpen(goal: Goal, day: string, due: 'on-or-before' | 'on'): boole
   return due === 'on' ? end === day : end <= day;
 }
 
-function formatCount(value: number): string {
-  if (Number.isInteger(value)) {
-    return String(value);
-  }
-  return String(Math.round(value * 10) / 10);
-}
-
-function progressBody(
-  goal: Goal,
-  entries: GoalEntry[],
-  day: string,
-  weekStartsOn: WeekStart,
-): string {
-  if (!isRepeating(goal)) {
-    return 'Due today';
-  }
-  const month = goal.repeatPeriod === 'month';
-  const total = periodTotalAsOf(goal, entries, day, weekStartsOn);
-  const target = month ? monthTarget(goal) : weekTargetFor(goal, day, weekStartsOn).target;
-  const period = month ? 'this month' : 'this week';
-  if (target == null) {
-    return `${formatCount(total)} ${period}`;
-  }
-  return `${formatCount(total)} of ${formatCount(target)} ${period}`;
-}
-
 function checkInBody(titles: string[]): string {
   const shown = titles.slice(0, 2);
   const extra = titles.length - shown.length;
@@ -285,6 +262,70 @@ function actionable(
   return ordered;
 }
 
+function goalReminderIdentifier(goalId: string, day: string): string {
+  return `goal-${goalId}-${day}`;
+}
+
+/** Repeating steps with planned days fire only then. Everything else fires every day. */
+function remindOnDay(goal: Goal, day: string): boolean {
+  if (!isRepeating(goal)) {
+    return true;
+  }
+  return (goal.plannedDays ?? []).includes(parseLocalDate(day).getDay());
+}
+
+function perGoalNotes(
+  nodes: Goal[],
+  loaded: GoalEntry[],
+  today: string,
+  days: number,
+  weekStartsOn: WeekStart,
+): Note[] {
+  const notes: Note[] = [];
+  for (let offset = 0; offset < days; offset += 1) {
+    const day = addDays(today, offset);
+    for (const goal of nodes) {
+      if (!goal.reminderTime || goal.status === 'done') {
+        continue;
+      }
+      if (!remindOnDay(goal, day)) {
+        continue;
+      }
+      if (day === today && isDoneForDay(goal, loaded, day, nodes, weekStartsOn)) {
+        continue;
+      }
+      const when = atLocal(day, goal.reminderTime);
+      if (!when || when.getTime() <= Date.now()) {
+        continue;
+      }
+      notes.push({
+        at: when.getTime(),
+        title: goal.title.trim() || 'Untitled',
+        body: 'Ready for today?',
+        identifier: goalReminderIdentifier(goal.id, day),
+      });
+    }
+  }
+  notes.sort((a, b) => a.at - b.at);
+  return notes;
+}
+
+/** Fewer days, then a hard cap, so the pending list stays under 60. */
+function cappedPerGoalNotes(
+  nodes: Goal[],
+  loaded: GoalEntry[],
+  today: string,
+  weekStartsOn: WeekStart,
+): Note[] {
+  let days = PER_GOAL_HORIZON;
+  let notes = perGoalNotes(nodes, loaded, today, days, weekStartsOn);
+  while (notes.length >= MAX_PENDING && days > 1) {
+    days -= 1;
+    notes = perGoalNotes(nodes, loaded, today, days, weekStartsOn);
+  }
+  return notes.length >= MAX_PENDING ? notes.slice(0, MAX_PENDING - 1) : notes;
+}
+
 async function collectNotes(): Promise<Note[]> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) {
@@ -296,6 +337,11 @@ async function collectNotes(): Promise<Note[]> {
   const ids = nodes.map((goal) => goal.id);
   const loaded =
     ids.length > 0 ? await getEntries(ids, addDays(today, -LOOKBACK_DAYS), today) : [];
+
+  if (settings.reminderMode === 'per_goal') {
+    return cappedPerGoalNotes(nodes, loaded, today, settings.weekStart);
+  }
+
   const childrenMap = buildChildrenMap(nodes);
   const steps = actionable(nodes, childrenMap);
   const notes: Note[] = [];
@@ -317,24 +363,6 @@ async function collectNotes(): Promise<Note[]> {
           body: checkInBody(left.map((goal) => goal.title.trim() || 'Untitled')),
         });
       }
-    }
-
-    for (const goal of steps) {
-      if (!goal.reminderTime) {
-        continue;
-      }
-      const due = isRepeating(goal)
-        ? repeatingStillLeft(goal, entries, day, settings.weekStart)
-        : oneTimeOpen(goal, day, 'on');
-      const when = due ? atLocal(day, goal.reminderTime) : null;
-      if (!when || when.getTime() <= Date.now()) {
-        continue;
-      }
-      notes.push({
-        at: when.getTime(),
-        title: goal.title.trim() || 'Untitled',
-        body: progressBody(goal, entries, day, settings.weekStart),
-      });
     }
   }
 
@@ -362,6 +390,7 @@ export async function rebuildReminders(): Promise<void> {
         return;
       }
       await Notifications.scheduleNotificationAsync({
+        ...(note.identifier ? { identifier: note.identifier } : {}),
         content: {
           title: note.title,
           body: note.body,
@@ -375,5 +404,59 @@ export async function rebuildReminders(): Promise<void> {
     }
   } catch (error) {
     console.warn('Failed to rebuild reminders', error);
+  }
+}
+
+/** Drop today's per-goal notification for this goal and its ancestors once the day is done. */
+export async function cancelTodayIfDone(goalId: string): Promise<void> {
+  try {
+    const settings = await getSettings();
+    if (settings.reminderMode !== 'per_goal') {
+      return;
+    }
+    const nodes = await getAllGoals();
+    const byId = new Map(nodes.map((goal) => [goal.id, goal]));
+    const chain: Goal[] = [];
+    const seen = new Set<string>();
+    let currentId: string | null = goalId;
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      const goal = byId.get(currentId);
+      if (!goal) {
+        break;
+      }
+      chain.push(goal);
+      currentId = goal.parentId;
+    }
+    if (chain.length === 0) {
+      return;
+    }
+
+    const today = todayLocal();
+    const ids = new Set<string>();
+    const childrenMap = buildChildrenMap(nodes);
+    const collect = (id: string) => {
+      if (ids.has(id)) {
+        return;
+      }
+      ids.add(id);
+      for (const child of childrenMap.get(id) ?? []) {
+        collect(child.id);
+      }
+    };
+    for (const goal of chain) {
+      collect(goal.id);
+    }
+    const entries = await getEntries([...ids], addDays(today, -LOOKBACK_DAYS), today);
+    for (const goal of chain) {
+      if (!isDoneForDay(goal, entries, today, nodes, settings.weekStart)) {
+        continue;
+      }
+      await Notifications.cancelScheduledNotificationAsync(
+        goalReminderIdentifier(goal.id, today),
+      );
+    }
+  } catch (error) {
+    console.warn('Failed to cancel done reminders', error);
   }
 }

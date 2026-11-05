@@ -17,10 +17,12 @@ import {
 import { FeedbackSheet } from '../components/FeedbackSheet';
 import { TimePickerModal } from '../components/TimePickerModal';
 import { BADGES } from '../constants/badges';
+import { MAYA_CHECKIN_OPTIONS, MAYA_DAILY } from '../constants/maya/daily';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { listEarnedBadges, type EarnedBadge } from '../lib/badges';
 import { clockFromDate, dateAtClock } from '../lib/clock';
+import { getAllGoals } from '../lib/goalTreeApi';
 import { localCalendarDay } from '../lib/localDate';
 import { getDisplayName, saveDisplayName } from '../lib/profileApi';
 import { resetTips } from '../lib/tips';
@@ -29,19 +31,28 @@ import {
   ensureNotificationPermission,
   NOTIFICATION_DENIED_MESSAGE,
 } from '../lib/reminders';
-import type { WeekStart } from '../lib/settingsApi';
+import type { MayaLevel, ReminderMode, WeekStart } from '../lib/settingsApi';
+import type { Goal } from '../types/goal';
 import { formatDateMDY } from '../utils/date';
 import { formatTime } from '../utils/formatTime';
 
 type Props = {
   navigation: {
-    navigate: (screen: 'DeleteAccount') => void;
+    navigate: (
+      screen: 'DeleteAccount' | 'Goal',
+      params?: { goalId: string; editReminder?: boolean },
+    ) => void;
   };
 };
 
 const WEEK_OPTIONS: { value: WeekStart; label: string }[] = [
   { value: 0, label: 'Sunday' },
   { value: 1, label: 'Monday' },
+];
+
+const REMINDER_OPTIONS: { value: ReminderMode; label: string }[] = [
+  { value: 'daily', label: 'One daily check-in' },
+  { value: 'per_goal', label: 'A reminder for each goal' },
 ];
 
 const APP_VERSION = Constants.expoConfig?.version ?? '';
@@ -134,6 +145,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [checkinPicker, setCheckinPicker] = useState(false);
   const [earnedBadges, setEarnedBadges] = useState<EarnedBadge[]>([]);
   const [badgesLoaded, setBadgesLoaded] = useState(false);
+  const [reminderGoals, setReminderGoals] = useState<Goal[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,6 +169,35 @@ export default function ProfileScreen({ navigation }: Props) {
       cancelled = true;
     };
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (settings.reminderMode !== 'per_goal') {
+        return;
+      }
+      let cancelled = false;
+      void getAllGoals()
+        .then((nodes) => {
+          if (cancelled) {
+            return;
+          }
+          setReminderGoals(
+            nodes
+              .filter((node) => node.parentId == null && node.status === 'active')
+              .sort((a, b) => a.sortOrder - b.sortOrder),
+          );
+        })
+        .catch((error) => {
+          console.warn('Failed to load goals for reminders', error);
+          if (!cancelled) {
+            setReminderGoals((current) => current ?? []);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [settings.reminderMode]),
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -383,30 +424,88 @@ export default function ProfileScreen({ navigation }: Props) {
           onChange={(weekStart) => void save({ weekStart })}
         />
         <View style={styles.separator} />
-        <View style={styles.row}>
-          <Text style={styles.rowLabel}>Evening check-in</Text>
-          <Switch
-            value={settings.checkinTime != null}
-            onValueChange={setEvening}
-            accessibilityLabel="Evening check-in"
-          />
-        </View>
-        {settings.checkinTime != null ? (
+        <ChoiceRow
+          label={MAYA_DAILY.checkIns}
+          value={settings.mayaLevel}
+          options={MAYA_CHECKIN_OPTIONS}
+          onChange={(mayaLevel: MayaLevel) => void save({ mayaLevel })}
+        />
+      </View>
+
+      <Text style={styles.section}>Reminders</Text>
+      <View style={styles.card}>
+        <ChoiceRow
+          label="Reminders"
+          value={settings.reminderMode}
+          options={REMINDER_OPTIONS}
+          onChange={(reminderMode) => void save({ reminderMode })}
+        />
+        {settings.reminderMode === 'per_goal' ? (
+          reminderGoals === null ? (
+            <ActivityIndicator color="#007aff" style={styles.badgeLoading} />
+          ) : reminderGoals.length === 0 ? (
+            <>
+              <View style={styles.separator} />
+              <Text style={styles.reminderNote}>Add a goal to set reminders.</Text>
+            </>
+          ) : (
+            reminderGoals.map((goal) => {
+              const title = goal.title.trim() || 'Untitled';
+              const timeLabel = goal.reminderTime
+                ? formatTime(dateAtClock(goal.reminderTime, 9, 0))
+                : 'Off';
+              return (
+                <View key={goal.id}>
+                  <View style={styles.separator} />
+                  <Pressable
+                    onPress={() =>
+                      navigation.navigate('Goal', { goalId: goal.id, editReminder: true })
+                    }
+                    style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${title}, reminder ${timeLabel}`}
+                  >
+                    <Text style={styles.goalTitle} numberOfLines={1}>
+                      {title}
+                    </Text>
+                    <View style={styles.goalReminderValue}>
+                      <Text style={styles.valueText}>{timeLabel}</Text>
+                      <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+                    </View>
+                  </Pressable>
+                </View>
+              );
+            })
+          )
+        ) : (
           <>
             <View style={styles.separator} />
-            <Pressable
-              onPress={() => setCheckinPicker(true)}
-              style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Evening check-in time"
-            >
-              <Text style={styles.rowLabel}>Time</Text>
-              <Text style={styles.valueText}>
-                {formatTime(dateAtClock(settings.checkinTime, 19, 0))}
-              </Text>
-            </Pressable>
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Evening check-in</Text>
+              <Switch
+                value={settings.checkinTime != null}
+                onValueChange={setEvening}
+                accessibilityLabel="Evening check-in"
+              />
+            </View>
+            {settings.checkinTime != null ? (
+              <>
+                <View style={styles.separator} />
+                <Pressable
+                  onPress={() => setCheckinPicker(true)}
+                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Evening check-in time"
+                >
+                  <Text style={styles.rowLabel}>Time</Text>
+                  <Text style={styles.valueText}>
+                    {formatTime(dateAtClock(settings.checkinTime, 19, 0))}
+                  </Text>
+                </Pressable>
+              </>
+            ) : null}
           </>
-        ) : null}
+        )}
       </View>
 
       <Text style={styles.section}>Help</Text>
@@ -622,6 +721,24 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: '#e5e5ea',
     marginLeft: 16,
+  },
+  reminderNote: {
+    fontSize: 15,
+    lineHeight: 20,
+    color: '#8e8e93',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+  },
+  goalTitle: {
+    flex: 1,
+    fontSize: 17,
+    color: '#111',
+  },
+  goalReminderValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   version: {
     fontSize: 13,

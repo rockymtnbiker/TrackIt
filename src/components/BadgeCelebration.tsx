@@ -4,7 +4,10 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { badgeByKey } from '../constants/badges';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { setBadgeCelebrationListener } from '../lib/badgeCelebration';
+import {
+  noteBadgeCelebrationDismissed,
+  setBadgeCelebrationListener,
+} from '../lib/badgeCelebration';
 import { checkBadges } from '../lib/badges';
 
 export function BadgeStartup() {
@@ -37,7 +40,13 @@ export function BadgeCelebrationHost() {
   const key = queue[0];
   const badge = key ? badgeByKey(key) : null;
   const dismiss = () => {
-    setQueue((current) => current.slice(1));
+    setQueue((current) => {
+      const next = current.slice(1);
+      if (next.length === 0) {
+        setTimeout(() => noteBadgeCelebrationDismissed(), 0);
+      }
+      return next;
+    });
   };
 
   return (

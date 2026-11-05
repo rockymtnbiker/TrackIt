@@ -47,15 +47,18 @@ function errorMessage(error: unknown): string {
 }
 
 export function SupportRequestSheet({
+  initialHelpType = null,
   onClose,
   onSent,
 }: {
+  /** Preselects "What would help most?" when Maya opens this sheet. */
+  initialHelpType?: HelpType | null;
   onClose: () => void;
   onSent: (request: SupportRequest) => void;
 }) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [helpType, setHelpType] = useState<HelpType | null>(null);
+  const [helpType, setHelpType] = useState<HelpType | null>(initialHelpType);
   const [details, setDetails] = useState('');
   const [method, setMethod] = useState<ContactMethod>('email');
   const [emailValue, setEmailValue] = useState(user?.email ?? '');

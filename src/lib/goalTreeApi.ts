@@ -160,9 +160,14 @@ function mapProgressPct(value: number | string | null | undefined): number | nul
   return Math.max(0, Math.min(100, Math.round(amount)));
 }
 
-function refreshReminders(): void {
+function refreshReminders(doneGoalId?: string | null): void {
   void import('./reminders')
-    .then(({ rebuildReminders }) => rebuildReminders())
+    .then(async ({ rebuildReminders, cancelTodayIfDone }) => {
+      await rebuildReminders();
+      if (doneGoalId) {
+        await cancelTodayIfDone(doneGoalId);
+      }
+    })
     .catch((error) => {
       console.warn('Failed to rebuild reminders', error);
     });
@@ -679,7 +684,7 @@ export async function updateGoal(
   const next = mapRowToNode(data as GoalRow);
   await recordTargetChange(mapRowToNode(existing), next, userId);
   const history = await fetchTargetHistory(userId);
-  refreshReminders();
+  refreshReminders(updates.status !== undefined ? id : null);
   return withHistory([next], history)[0];
 }
 
@@ -730,7 +735,7 @@ export async function setGoalStatus(
     throw error;
   }
 
-  refreshReminders();
+  refreshReminders(id);
   if (status === 'done' && existing.status !== 'done') {
     awardBadges();
   }
@@ -933,7 +938,7 @@ export async function insertEntry(
   const goals = logActivates(value)
     ? await activatePendingOnLog(goalId, entry.entryDate, userId)
     : [];
-  refreshReminders();
+  refreshReminders(goalId);
   awardBadges();
   return { entry, goals };
 }
@@ -954,20 +959,22 @@ export async function deleteEntry(
   if (error) {
     throw error;
   }
-  refreshReminders();
+  refreshReminders(goalId);
 }
 
 /** Delete one log row. */
 export async function deleteEntryById(entryId: string): Promise<void> {
   const userId = await requireUserId();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(ENTRIES_TABLE)
     .delete()
     .eq('user_id', userId)
-    .eq('id', entryId);
+    .eq('id', entryId)
+    .select('goal_id');
 
   if (error) {
     throw error;
   }
-  refreshReminders();
+  const goalId = ((data as { goal_id: string }[] | null) ?? [])[0]?.goal_id ?? null;
+  refreshReminders(goalId);
 }

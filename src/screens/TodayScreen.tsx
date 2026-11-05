@@ -1,5 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { CommonActions, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -29,10 +29,12 @@ import {
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { DatePickerModal } from '../components/DatePickerModal';
 import { NEXT_STEP_MESSAGE, NextStepActions } from '../components/NextStepPrompt';
+import { MayaDailyCard, MayaNudgeSheet, MayaToast } from '../components/MayaDailyUi';
 import { PageHeader } from '../components/PageHeader';
 import ProgressSheet from '../components/ProgressSheet';
 import { showActionSheet } from '../components/showActionSheet';
 import { AREA_ICONS } from '../constants/areaIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import {
@@ -54,6 +56,19 @@ import {
   startedOnOrBefore,
   type OneTimeOnDate,
 } from '../lib/asOfDate';
+import { mayaDailyLine } from '../lib/mayaDaily';
+import { planMayaReaction } from '../lib/mayaReact';
+import {
+  dismissMayaDaily,
+  getMayaDailyDismissed,
+  listMayaGoalIds,
+  markMayaNudgeShown,
+} from '../lib/mayaHelper';
+import { getDisplayName } from '../lib/profileApi';
+import {
+  watchBadgeCelebrationDismissed,
+  watchBadgeCelebrations,
+} from '../lib/badgeCelebration';
 import { goalStartDate } from '../lib/metrics';
 import {
   buildChildrenMap,
@@ -1322,6 +1337,7 @@ export default function TodayScreen() {
   const freshGoalId = route.params?.freshGoalId;
   const { user } = useAuth();
   const { settings } = useSettings();
+  const insets = useSafeAreaInsets();
   const weekStartsOn = settings.weekStart;
   const today = todayLocal();
   const todayWeekStart = startOfWeek(today, weekStartsOn);
@@ -1370,7 +1386,18 @@ export default function TodayScreen() {
   const [logAmount, setLogAmount] = useState('');
   const [logError, setLogError] = useState<string | null>(null);
   const [dismissedTips, setDismissedTips] = useState<ReadonlySet<string> | null>(null);
+  const [mayaGoalIds, setMayaGoalIds] = useState<string[]>([]);
+  const [mayaDismissedOn, setMayaDismissedOn] = useState<string | null>(null);
+  const [mayaName, setMayaName] = useState('');
+  const [mayaToast, setMayaToast] = useState<string | null>(null);
+  const [mayaNudge, setMayaNudge] = useState<{ goalId: string; text: string } | null>(null);
   const tipsLoadGen = useRef(0);
+  const lotsToastIndex = useRef(0);
+  const mayaPromptGen = useRef(0);
+  const badgeOpen = useRef(false);
+  const badgeEvents = useRef(0);
+  const badgeWaiters = useRef<Array<() => void>>([]);
+  const mayaLineRef = useRef<{ habitId: string } | null>(null);
   const dismissedDuringLoad = useRef(new Set<string>());
   const pendingTogglesRef = useRef<Set<string>>(new Set());
   const visibleWeekStartRef = useRef(visibleWeekStart);
@@ -1479,6 +1506,58 @@ export default function TodayScreen() {
       };
     }, [user?.id]),
   );
+
+  useFocusEffect(
+    useCallback(() => {
+      const userId = user?.id;
+      if (!userId) {
+        setMayaGoalIds([]);
+        setMayaDismissedOn(null);
+        setMayaName('');
+        return;
+      }
+      let cancelled = false;
+      void Promise.all([
+        listMayaGoalIds(userId),
+        getMayaDailyDismissed(userId),
+        getDisplayName(),
+      ])
+        .then(([ids, dismissed, name]) => {
+          if (cancelled) {
+            return;
+          }
+          setMayaGoalIds(ids);
+          setMayaDismissedOn(dismissed);
+          setMayaName(name);
+        })
+        .catch(() => {
+          // The Do list still works without Maya's line.
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [user?.id]),
+  );
+
+  useEffect(() => {
+    const unsubOpen = watchBadgeCelebrations(() => {
+      badgeOpen.current = true;
+      badgeEvents.current += 1;
+      setMayaToast(null);
+    });
+    const unsubClose = watchBadgeCelebrationDismissed(() => {
+      badgeOpen.current = false;
+      const waiting = badgeWaiters.current;
+      badgeWaiters.current = [];
+      for (const resolve of waiting) {
+        resolve();
+      }
+    });
+    return () => {
+      unsubOpen();
+      unsubClose();
+    };
+  }, []);
 
   const handleVisibleWeekChange = useCallback(
     (weekStart: string) => {
@@ -1779,6 +1858,76 @@ export default function TodayScreen() {
     showWeek(todayWeekStart, today);
   };
 
+  const waitForBadgeToClose = () => {
+    if (!badgeOpen.current) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      badgeWaiters.current.push(resolve);
+    });
+  };
+
+  const respondToMaya = (
+    stepId: string,
+    kind: 'log' | 'done',
+    before: GoalEntry[],
+    after: GoalEntry[],
+  ) => {
+    const userId = user?.id;
+    if (!userId) {
+      return;
+    }
+    const gen = ++mayaPromptGen.current;
+    const eventsAtStart = badgeEvents.current;
+    const openAtStart = badgeOpen.current;
+    void (async () => {
+      try {
+        const reaction = await planMayaReaction({
+          userId,
+          stepId,
+          kind,
+          nodes: nodesRef.current,
+          before,
+          after,
+          today,
+          weekStartsOn,
+          level: settings.mayaLevel,
+          lotsIndex: lotsToastIndex.current,
+        });
+        if (gen !== mayaPromptGen.current) {
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        if (gen !== mayaPromptGen.current) {
+          return;
+        }
+        const badgeShown =
+          openAtStart || badgeOpen.current || badgeEvents.current !== eventsAtStart;
+        if (!badgeShown && reaction.toast) {
+          if (settings.mayaLevel === 'lots') {
+            lotsToastIndex.current += 1;
+          }
+          setMayaToast(reaction.toast);
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          if (gen !== mayaPromptGen.current) {
+            return;
+          }
+          setMayaToast(null);
+        }
+        if (badgeOpen.current) {
+          await waitForBadgeToClose();
+        }
+        if (gen !== mayaPromptGen.current || !reaction.nudgeText || !reaction.goalId) {
+          return;
+        }
+        setMayaNudge({ goalId: reaction.goalId, text: reaction.nudgeText });
+        void markMayaNudgeShown(userId, reaction.goalId);
+      } catch (error) {
+        console.warn('Maya prompt failed', error);
+      }
+    })();
+  };
+
   const handleOneTime = (step: Goal, appearance: OneTimeOnDate) => {
     if (appearance === 'hidden' || isFutureDate(selectedDate, today)) {
       return;
@@ -1810,11 +1959,15 @@ export default function TodayScreen() {
       }),
     );
 
+    const loggedEntries = entriesRef.current;
     void setGoalStatus(step.id, next, markingDone ? selectedDate : undefined)
       .then((updated) => {
         setNodes((current) =>
           current.map((node) => (node.id === updated.id ? updated : node)),
         );
+        if (markingDone) {
+          respondToMaya(step.id, 'done', loggedEntries, loggedEntries);
+        }
       })
       .catch((error) => {
         console.warn('Failed to update step status', error);
@@ -1996,12 +2149,39 @@ export default function TodayScreen() {
   };
 
   const insertLog = (goalId: string, date: string, value: number | null) => {
+    const toggleKey = `${goalId}:${date}`;
+    if (pendingTogglesRef.current.has(toggleKey)) {
+      return;
+    }
+    const before = entriesRef.current;
+    const hideLine = date === today && mayaLineRef.current?.habitId === goalId;
+    const previousDismissed = mayaDismissedOn;
+    const userId = user?.id;
+    if (hideLine) {
+      setMayaDismissedOn(today);
+    }
     const local = localEntry(goalId, date, value);
+    const after = [...before, local];
     applyEntryChange(
       goalId,
       date,
-      [...entriesRef.current, local],
-      insertEntry(goalId, date, value),
+      after,
+      insertEntry(goalId, date, value)
+        .then((saved) => {
+          if (saved) {
+            if (hideLine && userId) {
+              void dismissMayaDaily(userId, today);
+            }
+            respondToMaya(goalId, 'log', before, after);
+          }
+          return saved;
+        })
+        .catch((error: unknown) => {
+          if (hideLine) {
+            setMayaDismissedOn(previousDismissed);
+          }
+          throw error;
+        }),
       local.id,
     );
   };
@@ -2111,6 +2291,36 @@ export default function TodayScreen() {
     navigation.navigate('GoalSetup');
   };
 
+  const mayaIdSet = useMemo(() => new Set(mayaGoalIds), [mayaGoalIds]);
+  const mayaLine = useMemo(
+    () =>
+      selectedDate === today
+        ? mayaDailyLine({
+            level: settings.mayaLevel,
+            name: mayaName,
+            hour: new Date().getHours(),
+            today,
+            dismissedOn: mayaDismissedOn,
+            weekStartsOn,
+            nodes,
+            entries,
+            mayaGoalIds: mayaIdSet,
+          })
+        : null,
+    [
+      entries,
+      mayaDismissedOn,
+      mayaIdSet,
+      mayaName,
+      nodes,
+      selectedDate,
+      settings.mayaLevel,
+      today,
+      weekStartsOn,
+    ],
+  );
+  mayaLineRef.current = mayaLine;
+
   if (loading && nodes.length === 0) {
     return (
       <View style={styles.container}>
@@ -2150,6 +2360,18 @@ export default function TodayScreen() {
       onStartShouldSetResponderCapture={clearHighlightOnTouch}
     >
     <PageHeader title="Do" subtitle="Tap a circle to log your progress" />
+    {mayaLine ? (
+      <MayaDailyCard
+        text={mayaLine.text}
+        onDismiss={() => {
+          setMayaDismissedOn(today);
+          const userId = user?.id;
+          if (userId) {
+            void dismissMayaDaily(userId, today);
+          }
+        }}
+      />
+    ) : null}
     <View ref={scrollHostRef} style={styles.container}>
     <ScrollView
       ref={scrollRef}
@@ -2607,6 +2829,27 @@ export default function TodayScreen() {
           maximumDate={parseLocalDate(today)}
           onCancel={() => setDonePromptGoalId(null)}
           onConfirm={confirmGoalDone}
+        />
+      ) : null}
+      {mayaToast ? (
+        <MayaToast text={mayaToast} bottom={insets.bottom + 72} />
+      ) : null}
+      {mayaNudge ? (
+        <MayaNudgeSheet
+          text={mayaNudge.text}
+          onClose={() => setMayaNudge(null)}
+          onInvite={() => {
+            setMayaNudge(null);
+            navigation.getParent()?.dispatch(
+              CommonActions.navigate({
+                name: 'Community',
+                params: {
+                  screen: 'CommunityMain',
+                  params: { openInvite: true },
+                },
+              }),
+            );
+          }}
         />
       ) : null}
     </View>

@@ -6,12 +6,14 @@ import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import GoalScreen from '../screens/GoalScreen';
 import LearnScreen from '../screens/LearnScreen';
 import PartnerScreen from '../screens/PartnerScreen';
+import MayaFlowScreen from '../screens/MayaFlowScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import type { CommentThreadParams, GoalRouteParams } from './GoalsStackNavigator';
 
 export type CommunityStackParamList = {
-  CommunityMain: undefined;
+  CommunityMain: { openSupport?: 'setup'; openInvite?: boolean } | undefined;
   Learn: undefined;
+  Maya: undefined;
   Partner: { connectionId: string; name: string; partnerId: string | null };
   Blocked: undefined;
   Goal: GoalRouteParams;
@@ -41,6 +43,16 @@ export default function CommunityStackNavigator() {
           title: 'Learn',
           headerBackTitle: 'Connect',
           headerTitleAlign: 'center',
+        }}
+      />
+      <Stack.Screen
+        name="Maya"
+        component={MayaFlowScreen}
+        options={{
+          presentation: 'fullScreenModal',
+          title: 'Maya',
+          headerTitleAlign: 'center',
+          headerBackVisible: false,
         }}
       />
       <Stack.Screen

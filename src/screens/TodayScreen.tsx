@@ -56,11 +56,13 @@ import {
   startedOnOrBefore,
   type OneTimeOnDate,
 } from '../lib/asOfDate';
+import { helperPhrase } from '../constants/maya/daily';
 import { mayaDailyLine } from '../lib/mayaDaily';
 import { planMayaReaction } from '../lib/mayaReact';
 import {
   dismissMayaDaily,
   getMayaDailyDismissed,
+  getMayaHelper,
   listMayaGoalIds,
   markMayaNudgeShown,
 } from '../lib/mayaHelper';
@@ -2839,16 +2841,28 @@ export default function TodayScreen() {
           text={mayaNudge.text}
           onClose={() => setMayaNudge(null)}
           onInvite={() => {
+            const goalId = mayaNudge.goalId;
+            const goalTitle = nodes.find((node) => node.id === goalId)?.title.trim() ?? '';
+            const userId = user?.id;
             setMayaNudge(null);
-            navigation.getParent()?.dispatch(
-              CommonActions.navigate({
-                name: 'Community',
-                params: {
-                  screen: 'CommunityMain',
-                  params: { openInvite: true },
-                },
-              }),
-            );
+            void (async () => {
+              const stored = userId ? await getMayaHelper(userId, goalId) : null;
+              navigation.getParent()?.dispatch(
+                CommonActions.navigate({
+                  name: 'Community',
+                  params: {
+                    screen: 'CommunityMain',
+                    params: {
+                      openCodeInvite: {
+                        goalId,
+                        goalTitle,
+                        title: `Invite ${helperPhrase(stored)}`,
+                      },
+                    },
+                  },
+                }),
+              );
+            })();
           }}
         />
       ) : null}

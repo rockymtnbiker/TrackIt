@@ -11,7 +11,13 @@ import ProfileScreen from '../screens/ProfileScreen';
 import type { CommentThreadParams, GoalRouteParams } from './GoalsStackNavigator';
 
 export type CommunityStackParamList = {
-  CommunityMain: { openSupport?: 'setup'; openInvite?: boolean } | undefined;
+  CommunityMain:
+    | {
+        openSupport?: 'setup';
+        openInvite?: boolean;
+        openCodeInvite?: { goalId: string; goalTitle: string; title: string };
+      }
+    | undefined;
   Learn: undefined;
   Maya: undefined;
   Partner: { connectionId: string; name: string; partnerId: string | null };

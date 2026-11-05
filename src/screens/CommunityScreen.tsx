@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { FormFieldRow, FormInlineInput } from '../components/FormFields';
 import { PageHeader } from '../components/PageHeader';
 import { FeedbackSheet } from '../components/FeedbackSheet';
+import { InviteCodeSheet, RedeemInviteSheet } from '../components/InviteCodeSheet';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { SupportRequestSheet } from '../components/SupportRequestSheet';
 import { WhatsComing } from '../components/WhatsComing';
@@ -25,6 +26,13 @@ import {
   respondToInvite,
   sendPartnerInvite,
 } from '../lib/communityApi';
+import { getGoal } from '../lib/goalTreeApi';
+import {
+  cancelInvite as cancelCodeInvite,
+  listMyPendingInvites,
+  sharePartnerInvite,
+  type PartnerInvite,
+} from '../lib/invitesApi';
 import { localCalendarDay } from '../lib/localDate';
 import { getLatestSupportRequest, type HelpType, type SupportRequest } from '../lib/supportApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
@@ -32,6 +40,26 @@ import type { Connection } from '../types/community';
 import { formatDate } from '../utils/date';
 
 type Props = NativeStackScreenProps<CommunityStackParamList, 'CommunityMain'>;
+
+type CodeSheetRequest = {
+  title: string;
+  goalId?: string | null;
+  goalTitle?: string | null;
+};
+
+type PendingCode = PartnerInvite & { goalTitle: string | null };
+
+function expiresLabel(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return formatDate(value.slice(0, 10));
+  }
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
 
 const INVITE_SENT =
   "Invite sent. If they have a TrackIt account, they'll see it in Connect.";
@@ -93,6 +121,9 @@ export default function CommunityScreen({ navigation, route }: Props) {
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [codeInvites, setCodeInvites] = useState<PendingCode[]>([]);
+  const [codeSheet, setCodeSheet] = useState<CodeSheetRequest | null>(null);
+  const [redeemOpen, setRedeemOpen] = useState(false);
 
   useEffect(() => {
     if (route.params?.openSupport !== 'setup') {
@@ -111,6 +142,19 @@ export default function CommunityScreen({ navigation, route }: Props) {
     navigation.setParams({ openInvite: undefined });
   }, [navigation, route.params?.openInvite]);
 
+  useEffect(() => {
+    const request = route.params?.openCodeInvite;
+    if (!request) {
+      return;
+    }
+    setCodeSheet({
+      title: request.title,
+      goalId: request.goalId,
+      goalTitle: request.goalTitle,
+    });
+    navigation.setParams({ openCodeInvite: undefined });
+  }, [navigation, route.params?.openCodeInvite]);
+
   const load = useCallback(async () => {
     setLoadError(null);
     try {
@@ -124,6 +168,28 @@ export default function CommunityScreen({ navigation, route }: Props) {
     }
   }, [refreshConnections]);
 
+  const loadCodes = useCallback(async () => {
+    try {
+      const invites = await listMyPendingInvites();
+      const withTitles = await Promise.all(
+        invites.map(async (invite) => {
+          if (!invite.goalId) {
+            return { ...invite, goalTitle: null };
+          }
+          try {
+            const goal = await getGoal(invite.goalId);
+            return { ...invite, goalTitle: goal?.title.trim() || null };
+          } catch {
+            return { ...invite, goalTitle: null };
+          }
+        }),
+      );
+      setCodeInvites(withTitles);
+    } catch {
+      // Partners still load if invite codes fail.
+    }
+  }, []);
+
   const loadLatestRequest = useCallback(async () => {
     try {
       setLatestRequest(await getLatestSupportRequest());
@@ -135,8 +201,9 @@ export default function CommunityScreen({ navigation, route }: Props) {
   useFocusEffect(
     useCallback(() => {
       void load();
+      void loadCodes();
       void loadLatestRequest();
-    }, [load, loadLatestRequest]),
+    }, [load, loadCodes, loadLatestRequest]),
   );
 
   const visible = connections.filter((connection) => !hiddenFromMe(connection));
@@ -290,13 +357,32 @@ export default function CommunityScreen({ navigation, route }: Props) {
           <ActivityIndicator color="#007aff" style={styles.partnersLoading} />
         ) : (
           <>
+        <View style={styles.inviteRow}>
+          <Pressable
+            onPress={() => setInviteOpen(true)}
+            style={({ pressed }) => [styles.inviteButton, styles.inviteButtonHalf, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Invite partner"
+          >
+            <Text style={styles.inviteButtonText}>+ Invite workout partner</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setCodeSheet({ title: 'Invite with a code' })}
+            style={({ pressed }) => [styles.inviteButton, styles.inviteButtonHalf, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Invite with a code"
+          >
+            <Text style={styles.inviteButtonText}>Invite with a code</Text>
+          </Pressable>
+        </View>
         <Pressable
-          onPress={() => setInviteOpen(true)}
-          style={({ pressed }) => [styles.inviteButton, pressed && styles.pressed]}
+          onPress={() => setRedeemOpen(true)}
+          style={({ pressed }) => [styles.codeRow, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Invite partner"
+          accessibilityLabel="Have an invite code?"
         >
-          <Text style={styles.inviteButtonText}>+ Invite workout partner</Text>
+          <Text style={styles.codeRowLabel}>Have an invite code?</Text>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
         </Pressable>
 
         {loadError ? <Text style={styles.errorText}>{loadError}</Text> : null}
@@ -410,7 +496,61 @@ export default function CommunityScreen({ navigation, route }: Props) {
           </>
         ) : null}
 
-        {isEmpty && !loadError ? (
+        {codeInvites.length > 0 ? (
+          <View style={styles.card}>
+            {codeInvites.map((invite, index) => (
+              <View key={invite.id}>
+                {index > 0 ? <View style={styles.separator} /> : null}
+                <View style={styles.inviteBlock}>
+                  <Text style={styles.inviteText}>
+                    Invite pending · {invite.inviteeName || 'No name'} · {invite.code}
+                  </Text>
+                  <Text style={styles.codeExpires}>Expires {expiresLabel(invite.expiresAt)}</Text>
+                  <View style={styles.inviteActions}>
+                    <Pressable
+                      onPress={() =>
+                        void sharePartnerInvite({
+                          name: invite.inviteeName ?? '',
+                          goalTitle: invite.goalTitle,
+                          code: invite.code,
+                        })
+                      }
+                      style={({ pressed }) => pressed && styles.pressed}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Share invite ${invite.code} again`}
+                    >
+                      <Text style={styles.accept}>Share again</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() =>
+                        Alert.alert('Cancel this invite?', 'This code will stop working.', [
+                          { text: 'Keep', style: 'cancel' },
+                          {
+                            text: 'Cancel',
+                            style: 'destructive',
+                            onPress: () =>
+                              void runInviteAction(invite.id, async () => {
+                                await cancelCodeInvite(invite.id);
+                                await loadCodes();
+                              }),
+                          },
+                        ])
+                      }
+                      disabled={busyId != null}
+                      style={({ pressed }) => pressed && styles.pressed}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Cancel invite ${invite.code}`}
+                    >
+                      <Text style={styles.decline}>Cancel</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {isEmpty && !loadError && codeInvites.length === 0 ? (
           <Text style={styles.empty}>
             Partners can see the goals you choose to share. Invite someone to get started.
           </Text>
@@ -521,6 +661,25 @@ export default function CommunityScreen({ navigation, route }: Props) {
         />
       ) : null}
       {feedbackOpen ? <FeedbackSheet onClose={() => setFeedbackOpen(false)} /> : null}
+      {codeSheet ? (
+        <InviteCodeSheet
+          title={codeSheet.title}
+          goalId={codeSheet.goalId}
+          goalTitle={codeSheet.goalTitle}
+          onClose={() => {
+            setCodeSheet(null);
+            void loadCodes();
+          }}
+        />
+      ) : null}
+      {redeemOpen ? (
+        <RedeemInviteSheet
+          onClose={() => setRedeemOpen(false)}
+          onConnected={() => {
+            void load();
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -566,6 +725,11 @@ const styles = StyleSheet.create({
     color: '#6B6B70',
     marginTop: 2,
   },
+  inviteRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
   inviteButton: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -573,6 +737,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
+  },
+  inviteButtonHalf: {
+    flex: 1,
+    marginBottom: 0,
+    paddingHorizontal: 8,
+  },
+  codeRow: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    minHeight: 48,
+    paddingHorizontal: 16,
+    marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  codeRowLabel: {
+    fontSize: 17,
+    color: '#111',
+  },
+  codeExpires: {
+    fontSize: 13,
+    color: '#6B6B70',
   },
   inviteButtonText: {
     fontSize: 17,

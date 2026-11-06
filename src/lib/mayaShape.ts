@@ -43,6 +43,8 @@ export type ShapeDraft = {
   /** Kept for the next slice. Not written to the database. */
   helper: string | null;
   level: MayaLevel;
+  /** The time block was declined. No habit step is saved. */
+  habitSkipped: boolean;
 };
 
 const AREA_CATEGORY: Record<string, string> = {
@@ -167,10 +169,45 @@ export function datePlusMonths(iso: string, months: number): string {
   return toLocalDateString(shifted);
 }
 
-export function createShapeDraft(answers: MayaAnswers, today = todayLocal()): ShapeDraft {
+/** Temperature picks the suggested weekly amount. Stretched or stuck also preselects two days. */
+function defaultHabit(answers: MayaAnswers): { habitChoice: string | null; days: number[] } {
+  const temp = textOf(answers, 'temp');
+  const copy = habitCopy(answers);
+  const choices = copy.choices;
+  const last = choices.length - 1;
+  if (last < 0) {
+    return { habitChoice: null, days: [] };
+  }
+  if (copy.kind === 'times') {
+    let index = -1;
+    if (temp === 'stretched' || temp === 'stuck') {
+      index = 0;
+    } else if (temp === 'handling') {
+      index = Math.floor(last / 2);
+    } else if (temp === 'level-up') {
+      index = last;
+    }
+    return { habitChoice: index >= 0 ? (choices[index]?.id ?? null) : null, days: [] };
+  }
+  if (temp === 'stretched' || temp === 'stuck') {
+    return { habitChoice: TIME_PRESET.choiceId, days: [...TIME_PRESET.days] };
+  }
+  if (temp === 'handling') {
+    return { habitChoice: '60', days: [] };
+  }
+  if (temp === 'level-up') {
+    return { habitChoice: '120', days: [] };
+  }
+  return { habitChoice: null, days: [] };
+}
+
+export function createShapeDraft(
+  answers: MayaAnswers,
+  today = todayLocal(),
+  level: MayaLevel = 'occasional',
+): ShapeDraft {
   const script = coachingScript(answers);
-  const preset =
-    focusedArea(MAYA_DISCOVER, answers).id === 'job' && textOf(answers, 'jobHard') === 'time';
+  const habit = defaultHabit(answers);
   return {
     focusKey: focusKey(answers),
     steps: script.steps.map((text, index) => ({
@@ -180,20 +217,25 @@ export function createShapeDraft(answers: MayaAnswers, today = todayLocal()): Sh
     })),
     title: defaultTitle(answers),
     targetDate: datePlusMonths(today, 3),
-    habitChoice: preset ? TIME_PRESET.choiceId : null,
+    habitChoice: habit.habitChoice,
     habitCustom: '',
-    days: preset ? [...TIME_PRESET.days] : [],
+    days: habit.days,
     helper: null,
-    level: 'occasional',
+    level,
+    habitSkipped: false,
   };
 }
 
-export function shapeSequence(answers: MayaAnswers): ShapeStepId[] {
+export function shapeSequence(answers: MayaAnswers, askLevel = true): ShapeStepId[] {
   const steps: ShapeStepId[] = [];
   if (!coachingScript(answers).skipScreen) {
     steps.push('coach');
   }
-  steps.push('name', 'habit', 'helper', 'level', 'summary');
+  steps.push('name', 'habit', 'helper');
+  if (askLevel) {
+    steps.push('level');
+  }
+  steps.push('summary');
   return steps;
 }
 
@@ -259,6 +301,16 @@ export function canAdvanceShape(step: ShapeStepId, draft: ShapeDraft, answers: M
   return false;
 }
 
+function formatCadence(copy: HabitCopy, amount: number): string {
+  if (copy.kind === 'times') {
+    return `${amount}×/week`;
+  }
+  if (amount > 0 && amount % 60 === 0) {
+    return `${amount / 60} hr/week`;
+  }
+  return `${amount} min/week`;
+}
+
 export function habitSummaryLine(
   answers: MayaAnswers,
   draft: ShapeDraft,
@@ -270,11 +322,39 @@ export function habitSummaryLine(
   if (amount == null) {
     return copy.name;
   }
-  if (copy.kind === 'minutes') {
-    return `${copy.name} · ${amount} min a week · ${days}`;
+  return `${copy.name} · ${formatCadence(copy, amount)} · ${days}`;
+}
+
+export function habitIsReady(answers: MayaAnswers, draft: ShapeDraft): boolean {
+  return !draft.habitSkipped && habitAmount(habitCopy(answers), draft) != null && draft.days.length > 0;
+}
+
+function stepChildren(draft: ShapeDraft): GoalInput[] {
+  return keptStepTitles(draft).map((title) => ({
+    title,
+    status: 'pending' as const,
+    unit: null,
+  }));
+}
+
+function habitChild(answers: MayaAnswers, draft: ShapeDraft, today: string): GoalInput | null {
+  if (draft.habitSkipped) {
+    return null;
   }
-  const word = amount === 1 ? 'time' : 'times';
-  return `${copy.name} · ${amount} ${word} a week · ${days}`;
+  const copy = habitCopy(answers);
+  const amount = habitAmount(copy, draft);
+  if (amount == null || draft.days.length === 0) {
+    return null;
+  }
+  return {
+    title: copy.name,
+    status: 'active',
+    actualStartDate: today,
+    repeatPeriod: 'week',
+    plannedDays: [...draft.days].sort((a, b) => a - b),
+    unit: copy.kind === 'minutes' ? 'minutes' : null,
+    targetAmount: amount,
+  };
 }
 
 export function shapedGoalPlan(
@@ -282,8 +362,6 @@ export function shapedGoalPlan(
   draft: ShapeDraft,
   today = todayLocal(),
 ): { parent: GoalInput; children: GoalInput[] } {
-  const copy = habitCopy(answers);
-  const amount = habitAmount(copy, draft);
   const parent: GoalInput = {
     title: draft.title.trim(),
     why: whyText(answers),
@@ -293,29 +371,47 @@ export function shapedGoalPlan(
     targetEndDate: draft.targetDate,
     unit: null,
   };
-  const children: GoalInput[] = keptStepTitles(draft).map((title) => ({
-    title,
-    status: 'pending',
-    unit: null,
-  }));
-  children.push({
-    title: copy.name,
+  const children = stepChildren(draft);
+  const habit = habitChild(answers, draft, today);
+  if (habit) {
+    children.push(habit);
+  }
+  return { parent, children };
+}
+
+/** Goal from whatever Maya has so far. Habit is included only when time and days were both chosen. */
+export function partialMayaPlan(
+  answers: MayaAnswers,
+  draft: ShapeDraft | null,
+  reached: { coach: boolean; habit: boolean },
+  today = todayLocal(),
+): { parent: GoalInput; children: GoalInput[] } {
+  const parent: GoalInput = {
+    title: (draft?.title.trim() || defaultTitle(answers)).trim() || defaultTitle(answers),
+    why: whyText(answers),
+    category: categoryFor(answers),
     status: 'active',
     actualStartDate: today,
-    repeatPeriod: 'week',
-    plannedDays: [...draft.days].sort((a, b) => a - b),
-    unit: copy.kind === 'minutes' ? 'minutes' : null,
-    targetAmount: amount,
-  });
+    targetEndDate: draft?.targetDate || datePlusMonths(today, 3),
+    unit: null,
+  };
+  const children: GoalInput[] = [];
+  if (reached.coach && draft) {
+    children.push(...stepChildren(draft));
+  }
+  if (reached.habit && draft) {
+    const habit = habitChild(answers, draft, today);
+    if (habit) {
+      children.push(habit);
+    }
+  }
   return { parent, children };
 }
 
 /** Creates the goal and its steps. Deletes them again if a later step fails. */
-export async function saveShapedGoal(answers: MayaAnswers, draft: ShapeDraft): Promise<string> {
-  const plan = shapedGoalPlan(answers, draft);
-  const habit = plan.children[plan.children.length - 1];
-  if (!plan.parent.title || habit?.targetAmount == null || habit.repeatPeriod == null) {
-    throw new Error('Add a title and a weekly amount before saving.');
+async function createPlan(plan: { parent: GoalInput; children: GoalInput[] }): Promise<string> {
+  if (!plan.parent.title.trim()) {
+    throw new Error('Add a title before saving.');
   }
   const created: string[] = [];
   try {
@@ -340,4 +436,19 @@ export async function saveShapedGoal(answers: MayaAnswers, draft: ShapeDraft): P
     }
     throw error;
   }
+}
+
+export async function saveShapedGoal(answers: MayaAnswers, draft: ShapeDraft): Promise<string> {
+  if (!draft.habitSkipped && habitChild(answers, draft, todayLocal()) == null) {
+    throw new Error('Add a title and a weekly amount before saving.');
+  }
+  return createPlan(shapedGoalPlan(answers, draft));
+}
+
+export async function savePartialMayaGoal(
+  answers: MayaAnswers,
+  draft: ShapeDraft | null,
+  reached: { coach: boolean; habit: boolean },
+): Promise<string> {
+  return createPlan(partialMayaPlan(answers, draft, reached));
 }

@@ -28,9 +28,18 @@ export type HabitCopy = {
 };
 
 export const SHAPE_COPY = {
-  namePrompt: "Here's a first draft of your goal. Make it yours.",
+  namePrompt: "Here's what we've got so far. Adjust the name or target date if you'd like.",
   targetDate: 'Target date',
-  habitPrompt: "Now let's make time for it. How much can you realistically give this each week?",
+  looksRight: 'Looks right',
+  editSteps: 'Edit steps',
+  habitPrompt: 'How much time each week will you set aside to work on these steps?',
+  habitNote: 'This becomes a weekly habit under your goal. Your steps get done during this time.',
+  habitTimesPrompt: 'How many times a week?',
+  habitTimesNote: 'This becomes a weekly habit under your goal.',
+  habitSkip: "Skip, I'll fit the steps in on my own",
+  tempStretched: "Since things are full right now, let's keep this small. You can always add more later.",
+  tempStuck: 'Getting unstuck usually starts with one small win.',
+  tempLevelUp: "You've got some energy for this, so let's give it real time.",
   daysPrompt: 'Which days work best?',
   more: 'More',
   minutesPlaceholder: 'Minutes',
@@ -39,7 +48,9 @@ export const SHAPE_COPY = {
   addStep: '+ Add your own step',
   why: 'Why',
   looksGood: 'Looks good',
-  changeSomething: 'Change something',
+  summaryHint: 'Tap any answer above to change it.',
+  noTimeBlock: 'No weekly time block',
+  undo: 'Undo',
   saving: 'Saving…',
 } as const;
 

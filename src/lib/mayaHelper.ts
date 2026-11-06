@@ -25,6 +25,10 @@ function nudgeKey(userId: string, goalId: string): string {
   return `maya-nudge:${userId}:${goalId}`;
 }
 
+function levelAskedKey(userId: string): string {
+  return `maya-level-asked:${userId}`;
+}
+
 const tails = new Map<string, Promise<unknown>>();
 
 /** Keep each user's writes in order, same as the dismissed-tips storage. */
@@ -115,6 +119,27 @@ export function mayaNudgeWasShown(userId: string, goalId: string): Promise<boole
       return (await AsyncStorage.getItem(nudgeKey(userId, goalId))) === 'shown';
     } catch {
       return false;
+    }
+  });
+}
+
+/** True after this person has already chosen how often Maya should check in. */
+export function getMayaLevelAsked(userId: string): Promise<boolean> {
+  return enqueue(userId, async () => {
+    try {
+      return (await AsyncStorage.getItem(levelAskedKey(userId))) === 'asked';
+    } catch {
+      return false;
+    }
+  });
+}
+
+export function markMayaLevelAsked(userId: string): Promise<void> {
+  return enqueue(userId, async () => {
+    try {
+      await AsyncStorage.setItem(levelAskedKey(userId), 'asked');
+    } catch {
+      // The in-memory flag still skips the question for the next goal this session.
     }
   });
 }

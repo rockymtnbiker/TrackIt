@@ -13,6 +13,8 @@ export type GoalRouteParams = {
   sharedByName?: string;
   /** Open the goal already editing, scrolled to the Reminder row. */
   editReminder?: boolean;
+  /** Open the goal already in edit mode. */
+  startEditing?: boolean;
 };
 
 export type CommentThreadParams = {

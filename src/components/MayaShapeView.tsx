@@ -3,114 +3,34 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { DatePickerModal } from './DatePickerModal';
 import { formFieldStyles } from './FormFields';
+import { SHAPE_COPY } from '../constants/maya/shape';
 import {
-  HELPER_OPTIONS,
-  LEVEL_OPTIONS,
-  SHAPE_COPY,
-} from '../constants/maya/shape';
-import {
-  coachingScript,
   habitCopy,
+  habitIsReady,
   habitSummaryLine,
   keptStepTitles,
   whyText,
   type ShapeDraft,
-  type ShapeStepId,
 } from '../lib/mayaShape';
 import type { MayaAnswers } from '../lib/mayaFlow';
 import { WEEKDAY_INITIALS, WEEKDAY_NAMES } from '../lib/goalDetailText';
 import { parseLocalDate, todayLocal, toLocalDateString } from '../lib/localDate';
-import type { MayaLevel, WeekStart } from '../lib/settingsApi';
+import type { WeekStart } from '../lib/settingsApi';
 import { weekdayOrder } from '../lib/week';
 import { formatDateMDY } from '../utils/date';
 
-export function MayaShapeView({
-  step,
+export function MayaCoachCard({
   draft,
-  answers,
-  weekStart,
-  saving,
   onDraft,
-  onLooksGood,
-  onChangeSomething,
-}: {
-  step: ShapeStepId;
-  draft: ShapeDraft;
-  answers: MayaAnswers;
-  weekStart: WeekStart;
-  saving: boolean;
-  onDraft: (next: ShapeDraft) => void;
-  onLooksGood: () => void;
-  onChangeSomething: () => void;
-}) {
-  if (step === 'coach') {
-    return <CoachStep draft={draft} answers={answers} onDraft={onDraft} />;
-  }
-  if (step === 'name') {
-    return <NameStep draft={draft} onDraft={onDraft} />;
-  }
-  if (step === 'habit') {
-    return <HabitStep draft={draft} answers={answers} weekStart={weekStart} onDraft={onDraft} />;
-  }
-  if (step === 'helper') {
-    return (
-      <ChoiceStep
-        prompt={SHAPE_COPY.helperPrompt}
-        options={HELPER_OPTIONS}
-        selected={draft.helper}
-        onSelect={(id) => onDraft({ ...draft, helper: id })}
-      />
-    );
-  }
-  if (step === 'level') {
-    return (
-      <ChoiceStep
-        prompt={SHAPE_COPY.levelPrompt}
-        options={LEVEL_OPTIONS}
-        selected={draft.level}
-        onSelect={(id) => onDraft({ ...draft, level: id as MayaLevel })}
-      />
-    );
-  }
-  return (
-    <SummaryStep
-      draft={draft}
-      answers={answers}
-      weekStart={weekStart}
-      saving={saving}
-      onLooksGood={onLooksGood}
-      onChangeSomething={onChangeSomething}
-    />
-  );
-}
-
-function Bubble({ text }: { text: string }) {
-  return (
-    <View style={styles.bubbleRow}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>M</Text>
-      </View>
-      <View style={styles.bubble}>
-        <Text style={styles.bubbleText}>{text}</Text>
-      </View>
-    </View>
-  );
-}
-
-function CoachStep({
-  draft,
-  answers,
-  onDraft,
+  onNext,
 }: {
   draft: ShapeDraft;
-  answers: MayaAnswers;
   onDraft: (next: ShapeDraft) => void;
+  onNext: () => void;
 }) {
-  const script = coachingScript(answers);
   const [focusId, setFocusId] = useState<string | null>(null);
   return (
     <View style={styles.stack}>
-      {script.lead ? <Bubble text={script.lead} /> : null}
       <View style={styles.choices}>
         {draft.steps.map((step) => (
           <View key={step.id} style={styles.stepRow}>
@@ -167,40 +87,86 @@ function CoachStep({
           <Text style={styles.choiceText}>{SHAPE_COPY.addStep}</Text>
         </Pressable>
       </View>
-      {script.follow ? <Bubble text={script.follow} /> : null}
+      <Pressable
+        onPress={onNext}
+        style={({ pressed }) => [styles.choice, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel="Next"
+      >
+        <Text style={styles.choiceText}>Next</Text>
+      </Pressable>
     </View>
   );
 }
 
-function NameStep({
+export function MayaPlanCard({
   draft,
+  answers,
+  showEditSteps,
   onDraft,
+  onLooksRight,
+  onEditSteps,
 }: {
   draft: ShapeDraft;
+  answers: MayaAnswers;
+  showEditSteps: boolean;
   onDraft: (next: ShapeDraft) => void;
+  onLooksRight: () => void;
+  onEditSteps: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const why = whyText(answers);
+  const steps = keptStepTitles(draft);
+  const ready = draft.title.trim().length > 0;
   return (
     <View style={styles.stack}>
-      <Bubble text={SHAPE_COPY.namePrompt} />
-      <TextInput
-        value={draft.title}
-        onChangeText={(title) => onDraft({ ...draft, title })}
-        placeholder="Your goal"
-        placeholderTextColor="#8e8e93"
-        maxLength={120}
-        style={styles.titleInput}
-        accessibilityLabel="Goal title"
-      />
-      <Pressable
-        onPress={() => setOpen(true)}
-        style={({ pressed }) => [styles.dateRow, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityLabel={`${SHAPE_COPY.targetDate}, ${formatDateMDY(draft.targetDate)}`}
-      >
-        <Text style={styles.dateLabel}>{SHAPE_COPY.targetDate}</Text>
-        <Text style={styles.dateValue}>{formatDateMDY(draft.targetDate)}</Text>
-      </Pressable>
+      <View style={styles.summary}>
+        <TextInput
+          value={draft.title}
+          onChangeText={(title) => onDraft({ ...draft, title })}
+          placeholder="Your goal"
+          placeholderTextColor="#8e8e93"
+          maxLength={120}
+          style={styles.titleInput}
+          accessibilityLabel="Goal title"
+        />
+        <Pressable
+          onPress={() => setOpen(true)}
+          style={({ pressed }) => [styles.dateRow, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={`${SHAPE_COPY.targetDate}, ${formatDateMDY(draft.targetDate)}`}
+        >
+          <Text style={styles.dateLabel}>{SHAPE_COPY.targetDate}</Text>
+          <Text style={styles.dateValue}>{formatDateMDY(draft.targetDate)}</Text>
+        </Pressable>
+        {why ? <Text style={styles.summaryBody}>{`${SHAPE_COPY.why}: ${why}`}</Text> : null}
+        {steps.map((step, index) => (
+          <Text key={`${index}-${step}`} style={styles.summaryBody}>
+            {'• '}
+            {step}
+          </Text>
+        ))}
+        {showEditSteps ? (
+          <Pressable
+            onPress={onEditSteps}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={SHAPE_COPY.editSteps}
+          >
+            <Text style={styles.link}>{SHAPE_COPY.editSteps}</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={onLooksRight}
+          disabled={!ready}
+          style={({ pressed }) => [styles.choice, styles.choiceInset, pressed && ready && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={SHAPE_COPY.looksRight}
+          accessibilityState={{ disabled: !ready }}
+        >
+          <Text style={[styles.choiceText, !ready && styles.choiceTextOff]}>{SHAPE_COPY.looksRight}</Text>
+        </Pressable>
+      </View>
       {open ? (
         <DatePickerModal
           title={SHAPE_COPY.targetDate}
@@ -217,72 +183,87 @@ function NameStep({
   );
 }
 
-function HabitStep({
+export function MayaHabitCard({
   draft,
   answers,
   weekStart,
   onDraft,
+  onNext,
+  onSkip,
 }: {
   draft: ShapeDraft;
   answers: MayaAnswers;
   weekStart: WeekStart;
   onDraft: (next: ShapeDraft) => void;
+  onNext: () => void;
+  onSkip: () => void;
 }) {
-  const script = coachingScript(answers);
   const copy = habitCopy(answers);
+  const ready = habitIsReady(answers, draft);
+  const steps = keptStepTitles(draft);
   return (
     <View style={styles.stack}>
-      {script.skipScreen && script.lead ? <Bubble text={script.lead} /> : null}
-      <Bubble text={SHAPE_COPY.habitPrompt} />
-      <View style={styles.choices}>
+      <View style={styles.summary}>
+        <Text style={styles.summaryTitle}>{draft.title.trim() || 'Your goal'}</Text>
+        {steps.map((step, index) => (
+          <Text key={`${index}-${step}`} style={styles.summaryBody}>
+            {'• '}
+            {step}
+          </Text>
+        ))}
+        {ready ? (
+          <Text style={styles.habitRow}>{habitSummaryLine(answers, draft, weekStart)}</Text>
+        ) : null}
+      </View>
+      <View style={styles.chipWrap}>
         {copy.choices.map((choice) => {
           const on = draft.habitChoice === choice.id;
           return (
             <Pressable
               key={choice.id}
-              onPress={() => onDraft({ ...draft, habitChoice: choice.id })}
-              style={({ pressed }) => [styles.option, on && styles.optionOn, pressed && styles.pressed]}
+              onPress={() => onDraft({ ...draft, habitChoice: choice.id, habitSkipped: false })}
+              style={({ pressed }) => [styles.chip, on && styles.chipOn, pressed && styles.pressed]}
               accessibilityRole="button"
               accessibilityLabel={choice.label}
               accessibilityState={{ selected: on }}
             >
-              <Text style={[styles.optionText, on && styles.optionTextOn]}>{choice.label}</Text>
-              {on ? <Ionicons name="checkmark" size={20} color="#007aff" /> : null}
+              <Text style={[styles.chipText, on && styles.chipTextOn]}>{choice.label}</Text>
             </Pressable>
           );
         })}
         {copy.allowMore ? (
           <Pressable
-            onPress={() => onDraft({ ...draft, habitChoice: 'more' })}
+            onPress={() => onDraft({ ...draft, habitChoice: 'more', habitSkipped: false })}
             style={({ pressed }) => [
-              styles.option,
-              draft.habitChoice === 'more' && styles.optionOn,
+              styles.chip,
+              draft.habitChoice === 'more' && styles.chipOn,
               pressed && styles.pressed,
             ]}
             accessibilityRole="button"
             accessibilityLabel={SHAPE_COPY.more}
             accessibilityState={{ selected: draft.habitChoice === 'more' }}
           >
-            <Text style={[styles.optionText, draft.habitChoice === 'more' && styles.optionTextOn]}>
+            <Text style={[styles.chipText, draft.habitChoice === 'more' && styles.chipTextOn]}>
               {SHAPE_COPY.more}
             </Text>
-            {draft.habitChoice === 'more' ? <Ionicons name="checkmark" size={20} color="#007aff" /> : null}
           </Pressable>
         ) : null}
       </View>
       {copy.allowMore && draft.habitChoice === 'more' ? (
         <TextInput
           value={draft.habitCustom}
-          onChangeText={(habitCustom) => onDraft({ ...draft, habitCustom: habitCustom.replace(/[^0-9]/g, '') })}
+          onChangeText={(habitCustom) =>
+            onDraft({ ...draft, habitCustom: habitCustom.replace(/[^0-9]/g, ''), habitSkipped: false })
+          }
           keyboardType="number-pad"
           placeholder={SHAPE_COPY.minutesPlaceholder}
           placeholderTextColor="#8e8e93"
           maxLength={4}
-          style={styles.titleInput}
+          style={styles.minutesInput}
           accessibilityLabel="Minutes a week"
         />
       ) : null}
-      <Bubble text={SHAPE_COPY.daysPrompt} />
+      <Text style={styles.daysLabel}>{SHAPE_COPY.daysPrompt}</Text>
       <View style={formFieldStyles.dayPicker}>
         {weekdayOrder(weekStart).map((day) => {
           const selected = draft.days.includes(day);
@@ -293,7 +274,7 @@ function HabitStep({
                 const days = selected
                   ? draft.days.filter((item) => item !== day)
                   : [...draft.days, day].sort((a, b) => a - b);
-                onDraft({ ...draft, days });
+                onDraft({ ...draft, days, habitSkipped: false });
               }}
               style={({ pressed }) => [
                 formFieldStyles.dayChip,
@@ -316,143 +297,88 @@ function HabitStep({
           );
         })}
       </View>
+      <Pressable
+        onPress={onNext}
+        disabled={!ready}
+        style={({ pressed }) => [styles.choice, pressed && ready && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel="Next"
+        accessibilityState={{ disabled: !ready }}
+      >
+        <Text style={[styles.choiceText, !ready && styles.choiceTextOff]}>Next</Text>
+      </Pressable>
+      <Pressable
+        onPress={onSkip}
+        style={({ pressed }) => [
+          styles.choice,
+          draft.habitSkipped && styles.optionOn,
+          pressed && styles.pressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel={SHAPE_COPY.habitSkip}
+      >
+        <Text style={styles.choiceText}>{SHAPE_COPY.habitSkip}</Text>
+      </Pressable>
     </View>
   );
 }
 
-function ChoiceStep({
-  prompt,
-  options,
-  selected,
-  onSelect,
-}: {
-  prompt: string;
-  options: readonly { id: string; label: string }[];
-  selected: string | null;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <View style={styles.stack}>
-      <Bubble text={prompt} />
-      <View style={styles.choices}>
-        {options.map((option) => {
-          const on = selected === option.id;
-          return (
-            <Pressable
-              key={option.id}
-              onPress={() => onSelect(option.id)}
-              style={({ pressed }) => [styles.option, on && styles.optionOn, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={option.label}
-              accessibilityState={{ selected: on }}
-            >
-              <Text style={[styles.optionText, on && styles.optionTextOn]}>{option.label}</Text>
-              {on ? <Ionicons name="checkmark" size={20} color="#007aff" /> : null}
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-function SummaryStep({
+export function MayaSummaryCard({
   draft,
   answers,
   weekStart,
   saving,
+  showActions,
   onLooksGood,
-  onChangeSomething,
 }: {
   draft: ShapeDraft;
   answers: MayaAnswers;
   weekStart: WeekStart;
   saving: boolean;
+  showActions: boolean;
   onLooksGood: () => void;
-  onChangeSomething: () => void;
 }) {
   const steps = keptStepTitles(draft);
   const why = whyText(answers);
+  const habit = habitIsReady(answers, draft)
+    ? habitSummaryLine(answers, draft, weekStart)
+    : SHAPE_COPY.noTimeBlock;
   return (
     <View style={styles.stack}>
       <View style={styles.summary}>
         <Text style={styles.summaryTitle}>{draft.title.trim()}</Text>
         <Text style={styles.summaryDate}>{formatDateMDY(draft.targetDate)}</Text>
-        {why ? (
-          <>
-            <Text style={styles.summaryLabel}>{SHAPE_COPY.why}</Text>
-            <Text style={styles.summaryBody}>{why}</Text>
-          </>
-        ) : null}
+        {why ? <Text style={styles.summaryBody}>{`${SHAPE_COPY.why}: ${why}`}</Text> : null}
         {steps.map((step, index) => (
           <Text key={`${index}-${step}`} style={styles.summaryBody}>
             {'• '}
             {step}
           </Text>
         ))}
-        <Text style={styles.summaryHabit}>{habitSummaryLine(answers, draft, weekStart)}</Text>
+        <Text style={styles.summaryHabit}>{habit}</Text>
+        {showActions ? (
+          <>
+            <Pressable
+              onPress={onLooksGood}
+              disabled={saving}
+              style={({ pressed }) => [styles.choice, styles.choiceInset, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel={SHAPE_COPY.looksGood}
+              accessibilityState={{ disabled: saving }}
+            >
+              {saving ? <ActivityIndicator color="#007aff" /> : <Text style={styles.choiceText}>{SHAPE_COPY.looksGood}</Text>}
+            </Pressable>
+            <Text style={styles.hint}>{SHAPE_COPY.summaryHint}</Text>
+          </>
+        ) : null}
       </View>
-      <Pressable
-        onPress={onLooksGood}
-        disabled={saving}
-        style={({ pressed }) => [styles.choice, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityLabel={SHAPE_COPY.looksGood}
-        accessibilityState={{ disabled: saving }}
-      >
-        {saving ? (
-          <ActivityIndicator color="#007aff" />
-        ) : (
-          <Text style={styles.choiceText}>{SHAPE_COPY.looksGood}</Text>
-        )}
-      </Pressable>
-      <Pressable
-        onPress={onChangeSomething}
-        disabled={saving}
-        style={({ pressed }) => [styles.choice, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityLabel={SHAPE_COPY.changeSomething}
-        accessibilityState={{ disabled: saving }}
-      >
-        <Text style={[styles.choiceText, saving && styles.choiceTextOff]}>{SHAPE_COPY.changeSomething}</Text>
-      </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   stack: {
-    gap: 16,
-  },
-  bubbleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#007aff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  bubble: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  bubbleText: {
-    fontSize: 17,
-    lineHeight: 24,
-    color: '#111',
+    gap: 12,
   },
   choices: {
     gap: 8,
@@ -466,6 +392,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  choiceInset: {
+    marginTop: 4,
+  },
   choiceText: {
     fontSize: 17,
     fontWeight: '600',
@@ -475,27 +404,8 @@ const styles = StyleSheet.create({
   choiceTextOff: {
     color: '#c7c7cc',
   },
-  option: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    minHeight: 48,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
   optionOn: {
     backgroundColor: '#e8f1ff',
-  },
-  optionText: {
-    flex: 1,
-    fontSize: 17,
-    color: '#111',
-  },
-  optionTextOn: {
-    color: '#007aff',
   },
   stepRow: {
     backgroundColor: '#fff',
@@ -518,6 +428,13 @@ const styles = StyleSheet.create({
     color: '#8e8e93',
   },
   titleInput: {
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: '700',
+    color: '#111',
+    padding: 0,
+  },
+  minutesInput: {
     backgroundColor: '#fff',
     borderRadius: 14,
     borderWidth: 1,
@@ -528,11 +445,7 @@ const styles = StyleSheet.create({
     color: '#111',
   },
   dateRow: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    minHeight: 48,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -564,12 +477,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#6B6B70',
   },
-  summaryLabel: {
-    marginTop: 6,
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#6B6B70',
-  },
   summaryBody: {
     fontSize: 17,
     lineHeight: 24,
@@ -580,6 +487,55 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 24,
     color: '#111',
+  },
+  habitRow: {
+    marginTop: 4,
+    backgroundColor: '#e8f1ff',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '600',
+    color: '#111',
+  },
+  link: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#007aff',
+  },
+  hint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6B6B70',
+    textAlign: 'center',
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    maxWidth: '100%',
+  },
+  chipOn: {
+    backgroundColor: '#007aff',
+  },
+  chipText: {
+    fontSize: 17,
+    color: '#111',
+  },
+  chipTextOn: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  daysLabel: {
+    fontSize: 15,
+    color: '#6B6B70',
   },
   pressed: {
     opacity: 0.55,

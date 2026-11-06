@@ -3,7 +3,45 @@ import { supabase } from './supabase';
 type ProfileRow = {
   display_name: string | null;
   onboarded_at?: string | null;
+  age_range?: string | null;
 };
+
+export type AgeRange = 'under_18' | '18_24' | '25_34' | '35_49' | '50_plus' | 'prefer_not';
+
+const AGE_RANGES: readonly AgeRange[] = [
+  'under_18',
+  '18_24',
+  '25_34',
+  '35_49',
+  '50_plus',
+  'prefer_not',
+];
+
+const AGE_BY_CHOICE: Record<string, AgeRange> = {
+  'under-18': 'under_18',
+  '18-24': '18_24',
+  '25-34': '25_34',
+  '35-49': '35_49',
+  '50-plus': '50_plus',
+  'prefer-not': 'prefer_not',
+  'Under 18': 'under_18',
+  '18–24': '18_24',
+  '25–34': '25_34',
+  '35–49': '35_49',
+  '50+': '50_plus',
+  'Prefer not to say': 'prefer_not',
+};
+
+export function ageRangeFromChoice(choice: string): AgeRange | null {
+  return AGE_BY_CHOICE[choice] ?? null;
+}
+
+function ageRangeFromStored(value: string | null | undefined): AgeRange | null {
+  if (!value) {
+    return null;
+  }
+  return AGE_RANGES.find((item) => item === value) ?? null;
+}
 
 export type MyProfile = {
   displayName: string;
@@ -44,6 +82,30 @@ export async function getMyProfile(): Promise<MyProfile> {
 export async function getDisplayName(): Promise<string> {
   const profile = await getMyProfile();
   return profile.displayName;
+}
+
+export async function getAgeRange(): Promise<AgeRange | null> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('age_range')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return ageRangeFromStored((data as ProfileRow | null)?.age_range);
+}
+
+export async function saveAgeRange(ageRange: AgeRange): Promise<void> {
+  const userId = await requireUserId();
+  const { error } = await supabase.from('profiles').update({ age_range: ageRange }).eq('id', userId);
+
+  if (error) {
+    throw error;
+  }
 }
 
 export async function saveDisplayName(displayName: string): Promise<void> {

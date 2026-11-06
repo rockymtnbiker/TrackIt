@@ -424,6 +424,7 @@ function ProgressReadout({
 export default function GoalScreen({ navigation, route }: Props) {
   const { goalId, readOnly = false, sharedByName } = route.params;
   const editReminder = route.params.editReminder === true && !readOnly;
+  const startEditing = route.params.startEditing === true && !readOnly;
   const { user } = useAuth();
   const ownerId = readOnly ? route.params.ownerId : user?.id;
   const { settings } = useSettings();
@@ -478,7 +479,7 @@ export default function GoalScreen({ navigation, route }: Props) {
       setNode(found);
       setEntries(nextEntries);
       setChildren(buildChildrenMap(nextNodes).get(goalId) ?? []);
-      if (found && editReminder && !primedReminder.current) {
+      if (found && (editReminder || startEditing) && !primedReminder.current) {
         primedReminder.current = true;
         setEditTitle(found.title);
         setEditing(true);
@@ -489,7 +490,7 @@ export default function GoalScreen({ navigation, route }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [goalId, ownerId, readOnly, editReminder]);
+  }, [goalId, ownerId, readOnly, editReminder, startEditing]);
 
   const openTargetDate = useCallback(
     (goal: Goal) => {

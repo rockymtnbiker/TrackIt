@@ -208,13 +208,17 @@ export function createShapeDraft(
 ): ShapeDraft {
   const script = coachingScript(answers);
   const habit = defaultHabit(answers);
+  const steps = script.steps.map((text, index) => ({
+    id: `step-${index}`,
+    text,
+    checked: true,
+  }));
   return {
     focusKey: focusKey(answers),
-    steps: script.steps.map((text, index) => ({
-      id: `step-${index}`,
-      text,
-      checked: true,
-    })),
+    steps:
+      steps.length === 0 && !script.skipScreen
+        ? [{ id: 'step-own', text: '', checked: true }]
+        : steps,
     title: defaultTitle(answers),
     targetDate: datePlusMonths(today, 3),
     habitChoice: habit.habitChoice,
@@ -290,7 +294,7 @@ export function canAdvanceShape(step: ShapeStepId, draft: ShapeDraft, answers: M
     return draft.title.trim().length > 0;
   }
   if (step === 'habit') {
-    return habitAmount(habitCopy(answers), draft) != null && draft.days.length > 0;
+    return habitIsReady(answers, draft);
   }
   if (step === 'helper') {
     return draft.helper != null;
@@ -303,7 +307,7 @@ export function canAdvanceShape(step: ShapeStepId, draft: ShapeDraft, answers: M
 
 function formatCadence(copy: HabitCopy, amount: number): string {
   if (copy.kind === 'times') {
-    return `${amount}×/week`;
+    return `${amount}× a week`;
   }
   if (amount > 0 && amount % 60 === 0) {
     return `${amount / 60} hr/week`;
@@ -325,8 +329,29 @@ export function habitSummaryLine(
   return `${copy.name} · ${formatCadence(copy, amount)} · ${days}`;
 }
 
+/** Times-per-week habits need at least one planned day per session. Null when the hint should stay hidden. */
+export function habitDaysShortfall(answers: MayaAnswers, draft: ShapeDraft): number | null {
+  const copy = habitCopy(answers);
+  if (copy.kind !== 'times' || draft.habitSkipped) {
+    return null;
+  }
+  const amount = habitAmount(copy, draft);
+  if (amount == null || draft.days.length >= amount) {
+    return null;
+  }
+  return amount;
+}
+
 export function habitIsReady(answers: MayaAnswers, draft: ShapeDraft): boolean {
-  return !draft.habitSkipped && habitAmount(habitCopy(answers), draft) != null && draft.days.length > 0;
+  if (draft.habitSkipped) {
+    return false;
+  }
+  const copy = habitCopy(answers);
+  const amount = habitAmount(copy, draft);
+  if (amount == null || draft.days.length === 0) {
+    return false;
+  }
+  return copy.kind !== 'times' || draft.days.length >= amount;
 }
 
 function stepChildren(draft: ShapeDraft): GoalInput[] {
@@ -344,6 +369,9 @@ function habitChild(answers: MayaAnswers, draft: ShapeDraft, today: string): Goa
   const copy = habitCopy(answers);
   const amount = habitAmount(copy, draft);
   if (amount == null || draft.days.length === 0) {
+    return null;
+  }
+  if (copy.kind === 'times' && draft.days.length < amount) {
     return null;
   }
   return {

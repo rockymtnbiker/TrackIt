@@ -103,15 +103,13 @@ export function renderNodeText(
   content: MayaContent,
   node: MayaNode,
   answers: MayaAnswers,
-  vars: { name: string; now: Date },
+  vars: { name: string },
 ): string {
-  const month = monthName(addMonths(vars.now, 3));
   const phrase = hardPhrase(content, answers);
   const because = phrase ? `, mostly because ${phrase}` : '';
   const better = textAnswer(answers, content.betterId);
   return fill(node.text, {
     name: vars.name.trim(),
-    month,
     area: areaLabel(content, answers),
     because,
     better,
@@ -270,10 +268,3 @@ function fill(template: string, vars: Record<string, string>): string {
   return text;
 }
 
-function addMonths(from: Date, count: number): Date {
-  return new Date(from.getFullYear(), from.getMonth() + count, 1);
-}
-
-function monthName(date: Date): string {
-  return date.toLocaleString('en-US', { month: 'long' });
-}

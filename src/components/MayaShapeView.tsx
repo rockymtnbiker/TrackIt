@@ -6,6 +6,7 @@ import { formFieldStyles } from './FormFields';
 import { SHAPE_COPY } from '../constants/maya/shape';
 import {
   habitCopy,
+  habitDaysShortfall,
   habitIsReady,
   habitSummaryLine,
   keptStepTitles,
@@ -28,53 +29,84 @@ export function MayaCoachCard({
   onDraft: (next: ShapeDraft) => void;
   onNext: () => void;
 }) {
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(() => {
+    const hasSuggestion = draft.steps.some((step) => step.text.trim().length > 0);
+    if (hasSuggestion) {
+      return null;
+    }
+    return draft.steps.find((step) => step.text.trim().length === 0)?.id ?? null;
+  });
   return (
     <View style={styles.stack}>
       <View style={styles.choices}>
-        {draft.steps.map((step) => (
-          <View key={step.id} style={styles.stepRow}>
-            <Pressable
-              onPress={() =>
-                onDraft({
-                  ...draft,
-                  steps: draft.steps.map((item) =>
-                    item.id === step.id ? { ...item, checked: !item.checked } : item,
-                  ),
-                })
-              }
-              hitSlop={6}
-              accessibilityRole="checkbox"
-              accessibilityLabel={step.text || 'Step'}
-              accessibilityState={{ checked: step.checked }}
-            >
-              <Ionicons
-                name={step.checked ? 'checkmark-circle' : 'ellipse-outline'}
-                size={22}
-                color={step.checked ? '#007aff' : '#c7c7cc'}
-              />
-            </Pressable>
-            <TextInput
-              value={step.text}
-              onChangeText={(text) =>
-                onDraft({
-                  ...draft,
-                  steps: draft.steps.map((item) => (item.id === step.id ? { ...item, text } : item)),
-                })
-              }
-              multiline
-              maxLength={240}
-              autoFocus={focusId === step.id}
-              placeholder="Your step"
-              placeholderTextColor="#8e8e93"
-              style={[styles.stepInput, !step.checked && styles.stepInputOff]}
-            />
-          </View>
-        ))}
+        {draft.steps.map((step) => {
+          const editing = editingId === step.id;
+          return (
+            <View key={step.id} style={styles.stepRow}>
+              <Pressable
+                onPress={() =>
+                  onDraft({
+                    ...draft,
+                    steps: draft.steps.map((item) =>
+                      item.id === step.id ? { ...item, checked: !item.checked } : item,
+                    ),
+                  })
+                }
+                hitSlop={6}
+                accessibilityRole="checkbox"
+                accessibilityLabel={step.text || 'Step'}
+                accessibilityState={{ checked: step.checked }}
+              >
+                <Ionicons
+                  name={step.checked ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={22}
+                  color={step.checked ? '#007aff' : '#c7c7cc'}
+                />
+              </Pressable>
+              {editing ? (
+                <TextInput
+                  value={step.text}
+                  onChangeText={(text) =>
+                    onDraft({
+                      ...draft,
+                      steps: draft.steps.map((item) => (item.id === step.id ? { ...item, text } : item)),
+                    })
+                  }
+                  onBlur={() => setEditingId((current) => (current === step.id ? null : current))}
+                  multiline
+                  maxLength={240}
+                  autoFocus
+                  placeholder="Your step"
+                  placeholderTextColor="#8e8e93"
+                  style={[styles.stepInput, !step.checked && styles.stepInputOff]}
+                />
+              ) : (
+                <Pressable
+                  onPress={() => setEditingId(step.id)}
+                  style={styles.stepTextHit}
+                  accessibilityRole="button"
+                  accessibilityLabel={step.text ? `Edit ${step.text}` : 'Edit step'}
+                >
+                  <Text style={[styles.stepInput, !step.text && styles.stepPlaceholder, !step.checked && styles.stepInputOff]}>
+                    {step.text || 'Your step'}
+                  </Text>
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => setEditingId(step.id)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={step.text ? `Edit ${step.text}` : 'Edit step'}
+              >
+                <Ionicons name="pencil" size={18} color="#8e8e93" />
+              </Pressable>
+            </View>
+          );
+        })}
         <Pressable
           onPress={() => {
             const id = `custom-${Date.now()}`;
-            setFocusId(id);
+            setEditingId(id);
             onDraft({
               ...draft,
               steps: [...draft.steps, { id, text: '', checked: true }],
@@ -200,6 +232,7 @@ export function MayaHabitCard({
 }) {
   const copy = habitCopy(answers);
   const ready = habitIsReady(answers, draft);
+  const daysShort = habitDaysShortfall(answers, draft);
   const steps = keptStepTitles(draft);
   return (
     <View style={styles.stack}>
@@ -297,6 +330,9 @@ export function MayaHabitCard({
           );
         })}
       </View>
+      {daysShort != null ? (
+        <Text style={styles.daysHint}>{SHAPE_COPY.pickDays.replace('[count]', String(daysShort))}</Text>
+      ) : null}
       <Pressable
         onPress={onNext}
         disabled={!ready}
@@ -417,12 +453,18 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 10,
   },
+  stepTextHit: {
+    flex: 1,
+  },
   stepInput: {
     flex: 1,
     fontSize: 17,
     lineHeight: 24,
     color: '#111',
     padding: 0,
+  },
+  stepPlaceholder: {
+    color: '#8e8e93',
   },
   stepInputOff: {
     color: '#8e8e93',
@@ -535,6 +577,11 @@ const styles = StyleSheet.create({
   },
   daysLabel: {
     fontSize: 15,
+    color: '#6B6B70',
+  },
+  daysHint: {
+    fontSize: 15,
+    lineHeight: 20,
     color: '#6B6B70',
   },
   pressed: {

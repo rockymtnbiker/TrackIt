@@ -299,7 +299,7 @@ export const MAYA_DISCOVER: MayaContent = {
     {
       id: 'playback',
       kind: 'playback',
-      text: 'Okay, here\'s what I\'m hearing: [area] is the big one[because], and by [month] you\'d like to see this: "[better]". Did I get that right?',
+      text: 'Okay, here\'s what I\'m hearing: [area] is the big one[because], and three months from now you\'d like to see this: "[better]". Did I get that right?',
       next: { type: 'choice' },
       options: [
         { id: 'yes', label: "Yep, that's it", to: { type: 'shape' } },

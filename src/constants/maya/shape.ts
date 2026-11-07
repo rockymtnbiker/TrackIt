@@ -25,6 +25,8 @@ export type HabitCopy = {
   choices: HabitChoice[];
   /** Minutes habits can take a typed amount. */
   allowMore: boolean;
+  /** Replaces the shared times-per-week question when this habit asks something more specific. */
+  prompt?: string;
 };
 
 export const SHAPE_COPY = {
@@ -41,11 +43,16 @@ export const SHAPE_COPY = {
   tempStuck: 'Getting unstuck usually starts with one small win.',
   tempLevelUp: "You've got some energy for this, so let's give it real time.",
   daysPrompt: 'Which days work best?',
+  pickDays: 'Pick at least [count] days.',
   more: 'More',
   minutesPlaceholder: 'Minutes',
   helperPrompt: "Who's one person who could help with this?",
   levelPrompt: 'Last thing: how much should I check in with you?',
   addStep: '+ Add your own step',
+  stepsSuggest:
+    "Now let's break your goal into steps you can actually act on. Here are a few I'd suggest. Keep the ones you like, reword any of them, or add your own.",
+  stepsFirst:
+    "Now let's break your goal into steps you can actually act on. What's one thing you could do first?",
   why: 'Why',
   looksGood: 'Looks good',
   summaryHint: 'Tap any answer above to change it.',
@@ -84,10 +91,15 @@ export const JOB_HABIT: HabitCopy = {
 };
 
 export const WORKOUT_HABIT: HabitCopy = {
-  name: 'Workout time',
-  kind: 'minutes',
-  choices: MINUTE_CHOICES,
-  allowMore: true,
+  name: 'Workout',
+  kind: 'times',
+  allowMore: false,
+  prompt: 'How many times a week will you work out?',
+  choices: [
+    { id: '2', label: '2', amount: 2 },
+    { id: '3', label: '3', amount: 3 },
+    { id: '4', label: '4', amount: 4 },
+  ],
 };
 
 export const OTHER_HABIT: HabitCopy = {

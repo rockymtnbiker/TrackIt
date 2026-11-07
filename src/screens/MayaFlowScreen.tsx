@@ -1,6 +1,6 @@
 import { CommonActions } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
@@ -118,7 +118,6 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const ageKnownRef = useRef(false);
   const askLevelRef = useRef(true);
   const levelAskedRef = useRef(false);
-  const now = useMemo(() => new Date(), []);
   const [name, setName] = useState('');
   const [profileReady, setProfileReady] = useState(false);
   const [walk, setWalk] = useState<MayaWalk>(() => initialWalk());
@@ -438,7 +437,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
         }
         const label = discoverAnswerLabel(step.id, answers);
         return {
-          before: [{ text: renderNodeText(MAYA_DISCOVER, node, answers, { name, now }) }],
+          before: [{ text: renderNodeText(MAYA_DISCOVER, node, answers, { name }) }],
           after: [],
           user: label || (node.skippable ? 'Skip' : null),
           card: null,
@@ -449,7 +448,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
       }
       return describeShape(step.id, draft, answers, settings.weekStart);
     },
-    [name, now, settings.weekStart, walk.answers, walk.draft],
+    [name, settings.weekStart, walk.answers, walk.draft],
   );
 
   const writeAnother = useCallback(() => {
@@ -643,7 +642,10 @@ function describeShape(
     const script = coachingScript(answers);
     const kept = keptStepTitles(draft);
     return {
-      before: script.lead ? [{ text: script.lead }] : [],
+      before: [
+        ...(script.lead ? [{ text: script.lead }] : []),
+        { text: script.steps.length > 0 ? SHAPE_COPY.stepsSuggest : SHAPE_COPY.stepsFirst },
+      ],
       after: script.follow ? [{ text: script.follow }] : [],
       user: kept.length > 0 ? kept.join(' · ') : 'No steps kept',
       card: null,
@@ -667,9 +669,10 @@ function describeShape(
     if (temp) {
       before.push({ text: temp });
     }
-    const times = habitCopy(answers).kind === 'times';
+    const copy = habitCopy(answers);
+    const times = copy.kind === 'times';
     before.push({
-      text: times ? SHAPE_COPY.habitTimesPrompt : SHAPE_COPY.habitPrompt,
+      text: copy.prompt ?? (times ? SHAPE_COPY.habitTimesPrompt : SHAPE_COPY.habitPrompt),
       note: times ? SHAPE_COPY.habitTimesNote : SHAPE_COPY.habitNote,
     });
     return {

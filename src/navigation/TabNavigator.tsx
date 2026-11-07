@@ -6,7 +6,9 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CommunityProvider, useCommunity } from '../context/CommunityContext';
 import CommentThreadScreen from '../screens/CommentThreadScreen';
+import PartnerScreen from '../screens/PartnerScreen';
 import DashboardScreen from '../screens/DashboardScreen';
+import WeeklyReflectionScreen from '../screens/WeeklyReflectionScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalSetupScreen from '../screens/GoalSetupScreen';
 import TodayScreen from '../screens/TodayScreen';
@@ -20,7 +22,7 @@ import GoalsStackNavigator, {
 export type RootTabParamList = {
   Today: NavigatorScreenParams<TodayStackParamList> | undefined;
   Goals: undefined;
-  Dashboard: undefined;
+  Dashboard: NavigatorScreenParams<DashboardStackParamList> | undefined;
   Community: undefined;
 };
 
@@ -28,6 +30,8 @@ export type { TodayStackParamList };
 
 export type DashboardStackParamList = {
   DashboardMain: undefined;
+  WeeklyReflection: { weekStart: string; readOnly?: boolean };
+  Partner: { connectionId: string; name: string; partnerId: string | null };
   Goal: GoalRouteParams;
   StepDetail: { goalId: string };
   Comments: CommentThreadParams;
@@ -73,8 +77,18 @@ function DashboardStackNavigator() {
         component={DashboardScreen}
         options={{
           headerShown: false,
-          title: 'Review',
-          headerBackTitle: 'Review',
+          title: 'Reflect',
+          headerBackTitle: 'Reflect',
+        }}
+      />
+      <DashboardStack.Screen
+        name="WeeklyReflection"
+        component={WeeklyReflectionScreen}
+        options={{
+          presentation: 'fullScreenModal',
+          title: 'Weekly reflection',
+          headerTitleAlign: 'center',
+          headerBackVisible: false,
         }}
       />
       <DashboardStack.Screen
@@ -86,6 +100,14 @@ function DashboardStackNavigator() {
         name="Comments"
         component={CommentThreadScreen}
         options={{ title: 'Comments', headerTitleAlign: 'center' }}
+      />
+      <DashboardStack.Screen
+        name="Partner"
+        component={PartnerScreen}
+        options={({ route }) => ({
+          title: route.params.name,
+          headerTitleAlign: 'center',
+        })}
       />
     </DashboardStack.Navigator>
   );
@@ -178,7 +200,7 @@ function TabScreens() {
         name="Dashboard"
         component={DashboardStackNavigator}
         options={{
-          tabBarLabel: 'Review',
+          tabBarLabel: 'Reflect',
           tabBarIcon: ({ focused, color }) => (
             <Ionicons
               name={focused ? 'stats-chart' : 'stats-chart-outline'}

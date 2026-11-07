@@ -4,7 +4,7 @@ import * as Notifications from 'expo-notifications';
 import { useAuth } from '../context/AuthContext';
 import { handleReminderResponse, rebuildReminders } from '../lib/reminders';
 
-/** Reschedules local reminders when the app opens or returns, and opens Do when one is tapped. */
+/** Reschedules local reminders when the app opens or returns, and opens the tab a reminder points at. */
 export function ReminderSync() {
   const { user } = useAuth();
 

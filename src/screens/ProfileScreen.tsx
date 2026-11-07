@@ -23,7 +23,9 @@ import { useSettings } from '../context/SettingsContext';
 import { listEarnedBadges, type EarnedBadge } from '../lib/badges';
 import { clockFromDate, dateAtClock } from '../lib/clock';
 import { getAllGoals } from '../lib/goalTreeApi';
+import { WEEKDAY_NAMES } from '../lib/goalDetailText';
 import { localCalendarDay } from '../lib/localDate';
+import { calendarDayLabels } from '../lib/week';
 import { getDisplayName, saveDisplayName } from '../lib/profileApi';
 import { resetTips } from '../lib/tips';
 import {
@@ -31,7 +33,7 @@ import {
   ensureNotificationPermission,
   NOTIFICATION_DENIED_MESSAGE,
 } from '../lib/reminders';
-import type { MayaLevel, ReminderMode, WeekStart } from '../lib/settingsApi';
+import type { MayaLevel, ReminderMode, WeekdayIndex, WeekStart } from '../lib/settingsApi';
 import type { Goal } from '../types/goal';
 import { formatDateMDY } from '../utils/date';
 import { formatTime } from '../utils/formatTime';
@@ -143,6 +145,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [savingName, setSavingName] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [checkinPicker, setCheckinPicker] = useState(false);
+  const [reflectionPicker, setReflectionPicker] = useState(false);
   const [earnedBadges, setEarnedBadges] = useState<EarnedBadge[]>([]);
   const [badgesLoaded, setBadgesLoaded] = useState(false);
   const [reminderGoals, setReminderGoals] = useState<Goal[] | null>(null);
@@ -430,6 +433,47 @@ export default function ProfileScreen({ navigation }: Props) {
           options={MAYA_CHECKIN_OPTIONS}
           onChange={(mayaLevel: MayaLevel) => void save({ mayaLevel })}
         />
+        <View style={styles.separator} />
+        <View style={styles.reflectionBlock}>
+          <Text style={styles.rowLabel}>Weekly reflection</Text>
+          <View style={styles.dayRow}>
+            {calendarDayLabels().map((label, day) => {
+              const selected = settings.reflectionDay === day;
+              return (
+                <Pressable
+                  key={label}
+                  onPress={() => {
+                    if (!selected) {
+                      void save({ reflectionDay: day as WeekdayIndex });
+                    }
+                  }}
+                  style={({ pressed }) => [
+                    styles.dayChip,
+                    selected && styles.dayChipOn,
+                    pressed && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={WEEKDAY_NAMES[day]}
+                  accessibilityState={{ selected }}
+                >
+                  <Text style={[styles.dayChipText, selected && styles.dayChipTextOn]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <View style={styles.separator} />
+        <Pressable
+          onPress={() => setReflectionPicker(true)}
+          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Weekly reflection time"
+        >
+          <Text style={styles.rowLabel}>Time</Text>
+          <Text style={styles.valueText}>
+            {formatTime(dateAtClock(settings.reflectionTime, 19, 0))}
+          </Text>
+        </Pressable>
       </View>
 
       <Text style={styles.section}>Reminders</Text>
@@ -565,6 +609,17 @@ export default function ProfileScreen({ navigation }: Props) {
           onConfirm={(date) => {
             setCheckinPicker(false);
             void save({ checkinTime: clockFromDate(date) });
+          }}
+        />
+      ) : null}
+      {reflectionPicker ? (
+        <TimePickerModal
+          title="Weekly reflection"
+          value={dateAtClock(settings.reflectionTime, 19, 0)}
+          onCancel={() => setReflectionPicker(false)}
+          onConfirm={(date) => {
+            setReflectionPicker(false);
+            void save({ reflectionTime: clockFromDate(date) });
           }}
         />
       ) : null}
@@ -721,6 +776,35 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: '#e5e5ea',
     marginLeft: 16,
+  },
+  reflectionBlock: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+    gap: 10,
+  },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  dayChip: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f2f2f7',
+  },
+  dayChipOn: {
+    backgroundColor: '#e8f1ff',
+  },
+  dayChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+  },
+  dayChipTextOn: {
+    color: '#007aff',
   },
   reminderNote: {
     fontSize: 15,

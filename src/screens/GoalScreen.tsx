@@ -84,6 +84,7 @@ import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate'
 import { DETAIL_LABELS } from '../lib/goalDetailText';
 import { pastDueStatus } from '../lib/statusMessages';
 import { STATUS_COLORS } from '../constants';
+import { REFLECTION_COPY } from '../constants/reflection';
 import { formatDate, formatShortDate, isPastDate } from '../utils/date';
 import { GoalReadout } from './StepDetailScreen';
 
@@ -425,6 +426,7 @@ export default function GoalScreen({ navigation, route }: Props) {
   const { goalId, readOnly = false, sharedByName } = route.params;
   const editReminder = route.params.editReminder === true && !readOnly;
   const startEditing = route.params.startEditing === true && !readOnly;
+  const fromReflection = route.params.fromReflection === true;
   const { user } = useAuth();
   const ownerId = readOnly ? route.params.ownerId : user?.id;
   const { settings } = useSettings();
@@ -1051,6 +1053,17 @@ export default function GoalScreen({ navigation, route }: Props) {
 
   return (
     <KeyboardSafe style={styles.container}>
+      {fromReflection ? (
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.reflectionBar, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={REFLECTION_COPY.backToReflection}
+        >
+          <Ionicons name="chevron-back" size={18} color="#007aff" />
+          <Text style={styles.reflectionBarText}>{REFLECTION_COPY.backToReflection}</Text>
+        </Pressable>
+      ) : null}
       <ScrollView
         ref={scrollRef}
         style={styles.container}
@@ -1783,6 +1796,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f2f2f7',
+  },
+  reflectionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e5ea',
+  },
+  reflectionBarText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#007aff',
   },
   content: {
     padding: 16,

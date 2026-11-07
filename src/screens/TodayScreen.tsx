@@ -9,6 +9,7 @@ import {
   FlatList,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -1378,6 +1379,7 @@ export default function TodayScreen() {
   const [nodes, setNodes] = useState<Goal[]>([]);
   const [entries, setEntries] = useState<GoalEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [logStepId, setLogStepId] = useState<string | null>(null);
   const [progressStepId, setProgressStepId] = useState<string | null>(null);
@@ -2386,6 +2388,16 @@ export default function TodayScreen() {
         styles.content,
         cardMode ? styles.contentWithCard : null,
       ]}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true);
+            void loadTodayData(visibleWeekStartRef.current).finally(() => setRefreshing(false));
+          }}
+          tintColor="#007aff"
+        />
+      }
     >
       <View style={styles.headerBlock}>
       <View style={styles.weekHeader}>

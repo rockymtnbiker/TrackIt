@@ -4,6 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -86,6 +87,7 @@ export default function GoalsListScreen({ navigation }: Props) {
   const [nodes, setNodes] = useState<Goal[]>([]);
   const [entries, setEntries] = useState<GoalEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -172,6 +174,16 @@ export default function GoalsListScreen({ navigation }: Props) {
         // inside the tab pager. disallowInterruption lets the long-press
         // drag take over once it activates.
         disallowInterruption={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              void load().finally(() => setRefreshing(false));
+            }}
+            tintColor="#007aff"
+          />
+        }
       >
         {loading && visibleNodes.length === 0 ? (
           <View style={styles.goalsStatus}>

@@ -5,22 +5,26 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { KeyboardSafe } from '../components/KeyboardSafe';
 import { useSettings } from '../context/SettingsContext';
 import { STATUS_COLORS } from '../constants';
 import { toneForStatusText, getWeekProgressMessage } from '../lib/statusMessages';
 import type { WeekStart } from '../lib/settingsApi';
-import { endOfWeek, startOfWeek, weekDays, weekdayLabels } from '../lib/week';
+import {
+  endOfWeek,
+  isReflectionWindow,
+  reflectionTargetWeek,
+  startOfWeek,
+  weekDays,
+  weekdayLabels,
+} from '../lib/week';
 import { entriesOnOrBefore, periodTotalAsOf } from '../lib/asOfDate';
 import {
   bigDealSummary,
@@ -48,7 +52,8 @@ import {
   type WeeklyReview,
 } from '../lib/weeklyReview';
 import { getAllGoals, getEntries } from '../lib/goalTreeApi';
-import { getReview, upsertReview, type WeekReview } from '../lib/reviewApi';
+import { REFLECTION_COPY } from '../constants/reflection';
+import { getReview, type WeekReview } from '../lib/reviewApi';
 import type { DashboardStackParamList, RootTabParamList } from '../navigation/TabNavigator';
 import type { GoalEntry, Goal } from '../types/goal';
 import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
@@ -645,135 +650,54 @@ function missedThisWeek(
   return missed;
 }
 
-const RATING_CHOICES = [1, 2, 3, 4, 5] as const;
-
-function ReviewSheet({
-  initial,
-  onCancel,
-  onSave,
+function ReflectionPrompt({
+  done,
+  windowOpen,
+  onStart,
+  onDone,
 }: {
-  initial: { rating: number | null; win: string; changeNext: string };
-  onCancel: () => void;
-  onSave: (draft: { rating: number; win: string; changeNext: string }) => Promise<void>;
+  done: boolean;
+  windowOpen: boolean;
+  onStart: () => void;
+  onDone: () => void;
 }) {
-  const insets = useSafeAreaInsets();
-  const [rating, setRating] = useState<number | null>(initial.rating);
-  const [win, setWin] = useState(initial.win);
-  const [changeNext, setChangeNext] = useState(initial.changeNext);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = () => {
-    if (rating == null || saving) {
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    void onSave({ rating, win, changeNext })
-      .catch((saveError) => {
-        setError(saveError instanceof Error ? saveError.message : 'Could not save the review.');
-        setSaving(false);
-      });
-  };
-
-  return (
-    <Modal visible animationType="slide" transparent onRequestClose={onCancel}>
-      <KeyboardSafe style={styles.sheetOverlay} keyboardVerticalOffset={0}>
+  if (done) {
+    return (
+      <Pressable
+        onPress={onDone}
+        style={({ pressed }) => [styles.reflectionDone, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={REFLECTION_COPY.reflectionDone}
+      >
+        <Text style={styles.reflectionDoneText}>{REFLECTION_COPY.reflectionDone}</Text>
+      </Pressable>
+    );
+  }
+  if (windowOpen) {
+    return (
+      <View style={styles.reflectionCard}>
+        <Text style={styles.reflectionTitle}>Your weekly reflection</Text>
+        <Text style={styles.reflectionLine}>Look back on your week and plan the next one.</Text>
         <Pressable
-          style={styles.sheetDismiss}
-          onPress={saving ? undefined : onCancel}
+          onPress={onStart}
+          style={({ pressed }) => [styles.reflectionStart, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Cancel review"
-        />
-        <View style={[styles.sheet, { paddingBottom: 16 + insets.bottom }]}>
-          <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
-            <Text style={styles.sheetTitle}>How did this week go?</Text>
-            <View style={styles.ratingRow}>
-              {RATING_CHOICES.map((choice) => {
-                const selected = rating === choice;
-                return (
-                  <Pressable
-                    key={choice}
-                    onPress={() => setRating(choice)}
-                    disabled={saving}
-                    style={({ pressed }) => [
-                      styles.ratingChoice,
-                      selected && styles.ratingChoiceSelected,
-                      pressed && styles.pressed,
-                    ]}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={
-                      choice === 1 ? 'Rate 1, rough' : choice === 5 ? 'Rate 5, great' : `Rate ${choice}`
-                    }
-                  >
-                    <Text style={[styles.ratingChoiceText, selected && styles.ratingChoiceTextSelected]}>
-                      {choice}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.ratingLabels}>
-              <Text style={styles.ratingLabel}>Rough</Text>
-              <Text style={styles.ratingLabel}>Great</Text>
-            </View>
-            <Text style={styles.sheetFieldLabel}>One win</Text>
-            <TextInput
-              style={styles.sheetInput}
-              value={win}
-              onChangeText={setWin}
-              placeholder="Optional"
-              placeholderTextColor="#aaa"
-              maxLength={280}
-              editable={!saving}
-              returnKeyType="done"
-            />
-            <Text style={styles.sheetFieldLabel}>One thing to change next week</Text>
-            <TextInput
-              style={styles.sheetInput}
-              value={changeNext}
-              onChangeText={setChangeNext}
-              placeholder="Optional"
-              placeholderTextColor="#aaa"
-              maxLength={280}
-              editable={!saving}
-              returnKeyType="done"
-            />
-            {error ? <Text style={styles.sheetError}>{error}</Text> : null}
-            <View style={styles.sheetActions}>
-              <Pressable
-                onPress={onCancel}
-                disabled={saving}
-                style={({ pressed }) => [styles.sheetCancel, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel"
-              >
-                <Text style={styles.sheetCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={save}
-                disabled={rating == null || saving}
-                style={({ pressed }) => [
-                  styles.sheetDone,
-                  (rating == null || saving) && styles.sheetDoneDisabled,
-                  pressed && rating != null && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: rating == null || saving }}
-                accessibilityLabel="Done"
-              >
-                {saving ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.sheetDoneText}>Done</Text>
-                )}
-              </Pressable>
-            </View>
-          </ScrollView>
-        </View>
-      </KeyboardSafe>
-    </Modal>
+          accessibilityLabel="Start"
+        >
+          <Text style={styles.reflectionStartText}>Start</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onStart}
+      style={({ pressed }) => [styles.reflectionLinkHit, pressed && styles.pressed]}
+      accessibilityRole="link"
+      accessibilityLabel="Start your reflection early"
+    >
+      <Text style={styles.reflectionLink}>Start your reflection early</Text>
+    </Pressable>
   );
 }
 
@@ -781,6 +705,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nodes, setNodes] = useState<Goal[]>([]);
   const [entries, setEntries] = useState<GoalEntry[]>([]);
@@ -790,11 +715,10 @@ export default function DashboardScreen({ navigation }: Props) {
   const [viewedWeek, setViewedWeek] = useState(() =>
     defaultReviewWeek(todayLocal(), weekStartsOn),
   );
-  const [weekReview, setWeekReview] = useState<{
+  const [reflectionRow, setReflectionRow] = useState<{
     weekStart: string;
     review: WeekReview | null;
   } | null>(null);
-  const [reviewSheetOpen, setReviewSheetOpen] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setLoadError(null);
@@ -899,28 +823,31 @@ export default function DashboardScreen({ navigation }: Props) {
   const canGoPrevious = weekStart > earliestWeek;
   const canGoNext = weekStart < currentWeek;
   const weekRange = `${formatShortDate(weekStart)} – ${formatShortDate(endOfWeek(weekStart, weekStartsOn))}`;
-  const savedReview = weekReview?.weekStart === weekStart ? weekReview.review : undefined;
-  const canCompleteReview = weekStart === currentWeek || weekStart === addDays(currentWeek, -7);
+  const reflectionWeek = reflectionTargetWeek(today, weekStartsOn, settings.reflectionDay);
+  const reflectionWindow = isReflectionWindow(today, settings.reflectionDay);
+  const reflectionKnown =
+    reflectionRow?.weekStart === reflectionWeek ? reflectionRow.review : undefined;
 
-  useEffect(() => {
-    setReviewSheetOpen(false);
-    let cancelled = false;
-    void getReview(weekStart)
-      .then((reviewRow) => {
-        if (!cancelled) {
-          setWeekReview({ weekStart, review: reviewRow });
-        }
-      })
-      .catch((error) => {
-        console.warn('Failed to load weekly review', error);
-        if (!cancelled) {
-          setWeekReview({ weekStart, review: null });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [weekStart]);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void getReview(reflectionWeek)
+        .then((reviewRow) => {
+          if (!cancelled) {
+            setReflectionRow({ weekStart: reflectionWeek, review: reviewRow });
+          }
+        })
+        .catch((error) => {
+          console.warn('Failed to load weekly reflection', error);
+          if (!cancelled) {
+            setReflectionRow({ weekStart: reflectionWeek, review: null });
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [reflectionWeek]),
+  );
 
   const appliedWeekStart = useRef(weekStartsOn);
   useEffect(() => {
@@ -1058,7 +985,7 @@ export default function DashboardScreen({ navigation }: Props) {
   if (loading && nodes.length === 0) {
     return (
       <View style={styles.safeArea}>
-        <PageHeader title="Review" subtitle="See how your week went" />
+        <PageHeader title="Reflect" subtitle="Look back on your week and plan the next" />
         <View style={styles.loadingState}>
           <ActivityIndicator color="#007aff" />
         </View>
@@ -1069,7 +996,7 @@ export default function DashboardScreen({ navigation }: Props) {
   if (loadError && nodes.length === 0) {
     return (
       <View style={styles.safeArea}>
-        <PageHeader title="Review" subtitle="See how your week went" />
+        <PageHeader title="Reflect" subtitle="Look back on your week and plan the next" />
         <View style={styles.loadingState}>
           <Text style={styles.errorText}>{loadError}</Text>
           <Pressable
@@ -1085,8 +1012,39 @@ export default function DashboardScreen({ navigation }: Props) {
 
   return (
     <View style={styles.safeArea}>
-      <PageHeader title="Review" subtitle="See how your week went" />
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <PageHeader title="Reflect" subtitle="Look back on your week and plan the next" />
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              const review = getReview(reflectionWeek)
+                .then((reviewRow) => {
+                  setReflectionRow({ weekStart: reflectionWeek, review: reviewRow });
+                })
+                .catch((error) => {
+                  console.warn('Failed to load weekly reflection', error);
+                  setReflectionRow({ weekStart: reflectionWeek, review: null });
+                });
+              void Promise.all([loadDashboard(), review]).finally(() => setRefreshing(false));
+            }}
+            tintColor="#007aff"
+          />
+        }
+      >
+            {reflectionKnown !== undefined ? (
+              <ReflectionPrompt
+                done={reflectionKnown != null}
+                windowOpen={reflectionWindow}
+                onStart={() => navigation.navigate('WeeklyReflection', { weekStart: reflectionWeek })}
+                onDone={() =>
+                  navigation.navigate('WeeklyReflection', { weekStart: reflectionWeek, readOnly: true })
+                }
+              />
+            ) : null}
             <View style={styles.weekHeader}>
               <Text style={styles.weekTitle}>{reviewWeekTitle(weekStart, currentWeek)}</Text>
               <View style={styles.weekNavRow}>
@@ -1312,34 +1270,6 @@ export default function DashboardScreen({ navigation }: Props) {
                 )}
               </View>
             ) : null}
-            {savedReview ? (
-              <Pressable
-                onPress={() => setReviewSheetOpen(true)}
-                style={({ pressed }) => [styles.weeklyCard, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel={`Reviewed, ${savedReview.rating} of 5. Tap to edit.`}
-              >
-                <View style={styles.reviewedTitleRow}>
-                  <Text style={styles.reviewedTitle}>✓ Reviewed</Text>
-                  <Text style={styles.reviewedRating}>{savedReview.rating}/5</Text>
-                </View>
-                {savedReview.win ? (
-                  <Text style={styles.reviewedNote}>{savedReview.win}</Text>
-                ) : null}
-                {savedReview.changeNext ? (
-                  <Text style={styles.reviewedNote}>{savedReview.changeNext}</Text>
-                ) : null}
-              </Pressable>
-            ) : savedReview === null && canCompleteReview ? (
-              <Pressable
-                onPress={() => setReviewSheetOpen(true)}
-                style={({ pressed }) => [styles.weeklyCard, styles.reviewButton, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Complete my review"
-              >
-                <Text style={styles.reviewButtonText}>Complete my review</Text>
-              </Pressable>
-            ) : null}
             <Pressable
               onPress={() =>
                 navigation.getParent<NavigationProp<RootTabParamList>>()?.navigate('Goals')
@@ -1351,30 +1281,6 @@ export default function DashboardScreen({ navigation }: Props) {
               <Text style={styles.planButtonText}>Plan next week →</Text>
             </Pressable>
       </ScrollView>
-      {reviewSheetOpen ? (
-        <ReviewSheet
-          initial={{
-            rating:
-              savedReview != null && savedReview.rating >= 1 && savedReview.rating <= 5
-                ? savedReview.rating
-                : null,
-            win: savedReview?.win ?? '',
-            changeNext: savedReview?.changeNext ?? '',
-          }}
-          onCancel={() => setReviewSheetOpen(false)}
-          onSave={async (draft) => {
-            const saved = await upsertReview({
-              weekStart,
-              rating: draft.rating,
-              win: draft.win,
-              changeNext: draft.changeNext,
-              donePct: Math.round(review.donePct * 100),
-            });
-            setWeekReview({ weekStart, review: saved });
-            setReviewSheetOpen(false);
-          }}
-        />
-      ) : null}
     </View>
   );
 }
@@ -1885,155 +1791,64 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#aaa',
   },
-  reviewButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
+  reflectionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  reviewButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#007aff',
-  },
-  reviewedTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  reviewedTitle: {
-    fontSize: 17,
+  reflectionTitle: {
+    fontSize: 20,
+    lineHeight: 26,
     fontWeight: '700',
     color: '#111',
   },
-  reviewedRating: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#007aff',
-  },
-  reviewedNote: {
+  reflectionLine: {
     fontSize: 15,
     lineHeight: 20,
-    color: '#666',
-    marginTop: 6,
+    color: '#6B6B70',
   },
-  sheetOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  sheetDismiss: {
-    flex: 1,
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    maxHeight: '90%',
-  },
-  sheetTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 12,
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  ratingChoice: {
-    flex: 1,
+  reflectionStart: {
+    marginTop: 8,
     minHeight: 44,
     borderRadius: 10,
+    backgroundColor: '#007aff',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f2f2f7',
-    borderWidth: 1,
-    borderColor: '#e5e5ea',
   },
-  ratingChoiceSelected: {
-    backgroundColor: '#007aff',
-    borderColor: '#007aff',
-  },
-  ratingChoiceText: {
+  reflectionStartText: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#111',
-  },
-  ratingChoiceTextSelected: {
     color: '#fff',
   },
-  ratingLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 6,
-    marginBottom: 16,
-  },
-  ratingLabel: {
-    fontSize: 13,
-    color: '#8e8e93',
-  },
-  sheetFieldLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 6,
-  },
-  sheetInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 17,
-    color: '#111',
-    backgroundColor: '#fff',
-    minHeight: 44,
+  reflectionLinkHit: {
+    alignSelf: 'flex-start',
     marginBottom: 14,
+    paddingVertical: 4,
   },
-  sheetError: {
-    fontSize: 14,
-    color: '#c62828',
-    marginBottom: 8,
-  },
-  sheetActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  sheetCancel: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  sheetCancelText: {
+  reflectionLink: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#555',
+    color: '#007aff',
   },
-  sheetDone: {
-    paddingHorizontal: 16,
+  reflectionDone: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 14,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#007aff',
-    minHeight: 44,
-    minWidth: 76,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  sheetDoneDisabled: {
-    opacity: 0.4,
-  },
-  sheetDoneText: {
+  reflectionDoneText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#fff',
+    color: '#248A3D',
   },
 });

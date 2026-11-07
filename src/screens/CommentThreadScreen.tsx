@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -5,6 +6,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Keyboard,
   Modal,
   Pressable,
   RefreshControl,
@@ -16,6 +18,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { showActionSheet } from '../components/showActionSheet';
+import { REFLECTION_COPY } from '../constants/reflection';
 import { useAuth } from '../context/AuthContext';
 import {
   blockPartner,
@@ -66,7 +69,7 @@ function relativeTime(iso: string): string {
 }
 
 export default function CommentThreadScreen({ navigation, route }: Props) {
-  const { goalId, ownerId, partnerId, goalTitle, partnerName } = route.params;
+  const { goalId, ownerId, partnerId, goalTitle, partnerName, fromReflection } = route.params;
   const title = goalTitle.trim() || 'Untitled';
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -84,6 +87,7 @@ export default function CommentThreadScreen({ navigation, route }: Props) {
   const [reportTarget, setReportTarget] = useState<GoalComment | null>(null);
   const [reason, setReason] = useState('');
   const [reporting, setReporting] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   const scrollToLatest = useCallback((animated: boolean) => {
     requestAnimationFrame(() => {
@@ -102,6 +106,20 @@ export default function CommentThreadScreen({ navigation, route }: Props) {
     scrollMode.current = 'none';
     scrollToLatest(mode === 'send');
   }, [comments, loading, scrollToLatest]);
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardOpen(true);
+      scrollToLatest(true);
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardOpen(false);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [scrollToLatest]);
 
   const load = useCallback(
     async (mode: 'open' | 'none') => {
@@ -179,6 +197,9 @@ export default function CommentThreadScreen({ navigation, route }: Props) {
       scrollMode.current = 'send';
       setComments((current) => [...current, comment]);
       setDraft('');
+      if (fromReflection) {
+        navigation.goBack();
+      }
     } catch (error) {
       Alert.alert('Could not send', errorMessage(error, 'Could not send that comment.'));
     } finally {
@@ -281,6 +302,17 @@ export default function CommentThreadScreen({ navigation, route }: Props) {
   return (
     <View style={styles.fill}>
       <KeyboardSafe style={styles.fill}>
+        {fromReflection ? (
+          <Pressable
+            onPress={() => navigation.goBack()}
+            style={({ pressed }) => [styles.backBar, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel={REFLECTION_COPY.backToReflection}
+          >
+            <Ionicons name="chevron-back" size={18} color="#007aff" />
+            <Text style={styles.backBarText}>{REFLECTION_COPY.backToReflection}</Text>
+          </Pressable>
+        ) : null}
         {loading ? (
           <View style={styles.centered}>
             <ActivityIndicator />
@@ -288,10 +320,17 @@ export default function CommentThreadScreen({ navigation, route }: Props) {
         ) : (
           <FlatList
             ref={listRef}
+            style={styles.messages}
             data={comments}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            onLayout={() => {
+              if (keyboardOpen) {
+                listRef.current?.scrollToEnd({ animated: true });
+              }
+            }}
             onContentSizeChange={() => {
               if (scrollMode.current === 'open') {
                 listRef.current?.scrollToEnd({ animated: false });
@@ -326,7 +365,12 @@ export default function CommentThreadScreen({ navigation, route }: Props) {
             }}
           />
         )}
-        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+        <View
+          style={[
+            styles.composer,
+            { paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 8) },
+          ]}
+        >
           <TextInput
             style={styles.input}
             value={draft}
@@ -418,6 +462,27 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  backBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e5ea',
+  },
+  backBarText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#007aff',
+  },
+  pressed: {
+    opacity: 0.55,
+  },
+  messages: {
+    flex: 1,
   },
   header: {
     alignItems: 'center',

@@ -21,9 +21,10 @@ import {
   MayaPlanCard,
   MayaSummaryCard,
 } from '../components/MayaShapeView';
-import { MAYA_CLOSING, closingHello } from '../constants/maya/closing';
+import { MAYA_CLOSING, closingHello, closingSeeYou } from '../constants/maya/closing';
 import { MAYA_DISCOVER, type MayaNode } from '../constants/maya/discover';
 import { HELPER_OPTIONS, LEVEL_OPTIONS, SHAPE_COPY } from '../constants/maya/shape';
+import { WEEKDAY_NAMES } from '../lib/goalDetailText';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import {
@@ -170,7 +171,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
     };
   }, [user?.id]);
 
-  const visibleEnd = closing ? walk.path.length + 2 : walk.cursor + 1;
+  const visibleEnd = closing ? walk.path.length + 3 : walk.cursor + 1;
   const shown = Math.min(revealed, visibleEnd);
   const stepCount = Math.min(shown, closing ? walk.path.length : walk.cursor + 1);
   const closingCount = closing ? Math.max(0, shown - walk.path.length) : 0;
@@ -458,6 +459,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
       frozen.push(...freezeStep(describe(step)));
     }
     frozen.push({ kind: 'maya', text: closingHello(name) });
+    frozen.push({ kind: 'maya', text: closingSeeYou(WEEKDAY_NAMES[settings.reflectionDay]) });
     frozen.push({ kind: 'maya', text: MAYA_CLOSING.coach });
     frozen.push({ kind: 'user', text: MAYA_CLOSING.another });
     const number = goalNumber + 1;
@@ -468,7 +470,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
     setClosing(false);
     setRevealed(0);
     savedGoalId.current = null;
-  }, [describe, goalNumber, name, replaceWalk]);
+  }, [describe, goalNumber, name, replaceWalk, settings.reflectionDay]);
 
   const showEditSteps = walk.path.some(
     (step, index) => step.kind === 'shape' && step.id === 'coach' && index < walk.cursor,
@@ -562,6 +564,9 @@ export default function MayaFlowScreen({ navigation }: Props) {
         })}
         {closingCount >= 1 ? <MayaBubble text={closingHello(name)} /> : null}
         {closingCount >= 2 ? (
+          <MayaBubble text={closingSeeYou(WEEKDAY_NAMES[settings.reflectionDay])} />
+        ) : null}
+        {closingCount >= 3 ? (
           <>
             <MayaBubble text={MAYA_CLOSING.coach} />
             <View style={styles.choices}>

@@ -18,6 +18,7 @@ import { supabase } from './supabase';
 import type { Goal, GoalEntry } from '../types/goal';
 import { navigationRef } from '../navigation/navigationRef';
 import { normalizeDateOnly, parseLocalDate, todayLocal } from './localDate';
+import { reflectionDateInWeek } from './week';
 import { addDays } from '../utils/date';
 
 export const DEFAULT_CHECKIN = '19:00:00';
@@ -48,6 +49,7 @@ type Note = {
   title: string;
   body: string;
   identifier?: string;
+  open?: 'do' | 'reflect';
 };
 
 let ticket = 0;
@@ -127,6 +129,18 @@ export async function cancelReminders(): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
 }
 
+export function openReflect(): void {
+  if (!navigationRef.isReady()) {
+    return;
+  }
+  navigationRef.dispatch(
+    CommonActions.navigate({
+      name: 'Dashboard',
+      params: { screen: 'DashboardMain' },
+    }),
+  );
+}
+
 export function openDoToday(freshGoalId?: string): void {
   if (!navigationRef.isReady()) {
     return;
@@ -148,7 +162,8 @@ export function openDoToday(freshGoalId?: string): void {
 export async function handleReminderResponse(
   response: Notifications.NotificationResponse | null,
 ): Promise<void> {
-  if (!response || response.notification.request.content.data?.open !== 'do') {
+  const open = response?.notification.request.content.data?.open;
+  if (!response || (open !== 'do' && open !== 'reflect')) {
     return;
   }
   const id = response.notification.request.identifier;
@@ -157,7 +172,26 @@ export async function handleReminderResponse(
     return;
   }
   await AsyncStorage.setItem(HANDLED_RESPONSE_KEY, id);
+  if (open === 'reflect') {
+    openReflect();
+    return;
+  }
   openDoToday();
+}
+
+function reflectionReminderId(day: string): string {
+  return `reflection-${day}`;
+}
+
+/** Drops the reflection reminder for the week that contains today. The save flow will call this. */
+export async function cancelThisWeeksReflectionReminder(): Promise<void> {
+  try {
+    const settings = await getSettings();
+    const day = reflectionDateInWeek(todayLocal(), settings.weekStart, settings.reflectionDay);
+    await Notifications.cancelScheduledNotificationAsync(reflectionReminderId(day));
+  } catch (error) {
+    console.warn('Failed to cancel reflection reminder', error);
+  }
 }
 
 function atLocal(day: string, clock: string): Date | null {
@@ -266,6 +300,33 @@ function goalReminderIdentifier(goalId: string, day: string): string {
   return `goal-${goalId}-${day}`;
 }
 
+/** One notification on each upcoming reflection weekday, at the reflection time. */
+function reflectionNotes(
+  reflectionTime: string,
+  reflectionDay: number,
+  today: string,
+): Note[] {
+  const notes: Note[] = [];
+  for (let offset = 0; offset < HORIZON_DAYS; offset += 1) {
+    const day = addDays(today, offset);
+    if (parseLocalDate(day).getDay() !== reflectionDay) {
+      continue;
+    }
+    const when = atLocal(day, reflectionTime);
+    if (!when || when.getTime() <= Date.now()) {
+      continue;
+    }
+    notes.push({
+      at: when.getTime(),
+      title: 'Ready for your weekly reflection?',
+      body: 'Take a few minutes to look back and plan your week.',
+      identifier: reflectionReminderId(day),
+      open: 'reflect',
+    });
+  }
+  return notes;
+}
+
 /** Repeating steps with planned days fire only then. Everything else fires every day. */
 function remindOnDay(goal: Goal, day: string): boolean {
   if (!isRepeating(goal)) {
@@ -338,8 +399,11 @@ async function collectNotes(): Promise<Note[]> {
   const loaded =
     ids.length > 0 ? await getEntries(ids, addDays(today, -LOOKBACK_DAYS), today) : [];
 
+  const reflection = reflectionNotes(settings.reflectionTime, settings.reflectionDay, today);
   if (settings.reminderMode === 'per_goal') {
-    return cappedPerGoalNotes(nodes, loaded, today, settings.weekStart);
+    const room = Math.max(0, MAX_PENDING - reflection.length);
+    const goalNotes = cappedPerGoalNotes(nodes, loaded, today, settings.weekStart).slice(0, room);
+    return [...goalNotes, ...reflection].sort((a, b) => a.at - b.at);
   }
 
   const childrenMap = buildChildrenMap(nodes);
@@ -366,6 +430,7 @@ async function collectNotes(): Promise<Note[]> {
     }
   }
 
+  notes.push(...reflection);
   notes.sort((a, b) => a.at - b.at);
   return notes.slice(0, MAX_PENDING);
 }
@@ -394,7 +459,7 @@ export async function rebuildReminders(): Promise<void> {
         content: {
           title: note.title,
           body: note.body,
-          data: { open: 'do' },
+          data: { open: note.open ?? 'do' },
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DATE,

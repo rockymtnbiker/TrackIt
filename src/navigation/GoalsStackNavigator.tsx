@@ -15,6 +15,8 @@ export type GoalRouteParams = {
   editReminder?: boolean;
   /** Open the goal already in edit mode. */
   startEditing?: boolean;
+  /** Show a bar that returns to the weekly reflection in progress. */
+  fromReflection?: boolean;
 };
 
 export type CommentThreadParams = {
@@ -23,6 +25,8 @@ export type CommentThreadParams = {
   partnerId: string;
   goalTitle: string;
   partnerName: string;
+  /** Opened from the weekly reflection's "Send a note". */
+  fromReflection?: boolean;
 };
 
 export type GoalsStackParamList = {

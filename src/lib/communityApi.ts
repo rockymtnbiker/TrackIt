@@ -200,6 +200,9 @@ function mapConnection(row: ConnectionRow): Connection {
         row.name,
     ),
     status: row.status ?? '',
+    role: row.role?.toLowerCase() === 'coach' || row.role?.toLowerCase() === 'partner'
+      ? (row.role.toLowerCase() as 'partner' | 'coach')
+      : null,
     incoming,
     blockedByMe:
       typeof row.blocked_by_me === 'boolean'

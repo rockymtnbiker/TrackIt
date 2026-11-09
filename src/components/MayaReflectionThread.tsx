@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type ViewInstance,
 } from 'react-native';
 import {
   MAYA_REFLECTION,
@@ -105,9 +106,17 @@ export function MayaReflectionThread(props: {
   scrollTarget: { id: ReflectionTrailId; token: number } | null;
 }) {
   const scrollRef = useRef<ScrollViewInstance>(null);
+  const contentRef = useRef<ViewInstance>(null);
   const anchors = useRef<Partial<Record<ReflectionTrailId, number>>>({});
   const followEnd = useRef(true);
+  const scrollY = useRef(0);
+  const viewportH = useRef(0);
+  const prevEditing = useRef<ReflectionEdit | null>(null);
   const [name, setName] = useState('');
+  const [replyAnchor, setReplyAnchor] = useState<string | null>(null);
+  if (props.editing != null || prevEditing.current != null) {
+    followEnd.current = false;
+  }
   const editing = props.editing;
   const hideAfterGoal = editing?.kind === 'goal';
   const hideConnect = editing?.kind === 'goal' || editing?.kind === 'others';
@@ -126,13 +135,46 @@ export function MayaReflectionThread(props: {
       });
   }, []);
 
-  useEffect(() => {
-    followEnd.current = editing == null;
-    if (editing == null) {
-      scrollRef.current?.scrollTo({ y: 100000, animated: true });
+  const revealReply = useCallback((node: ViewInstance) => {
+    const content = contentRef.current;
+    const scroller = scrollRef.current;
+    if (!content || !scroller) {
+      return;
     }
+    node.measureLayout(
+      content,
+      (_left, top, _width, height) => {
+        const replyBottom = 16 + top + height;
+        const visibleBottom = scrollY.current + viewportH.current;
+        const margin = 16;
+        if (replyBottom > visibleBottom - margin) {
+          scroller.scrollTo({
+            y: scrollY.current + (replyBottom - visibleBottom) + margin,
+            animated: true,
+          });
+        }
+      },
+      () => {},
+    );
+  }, []);
+
+  useEffect(() => {
+    if (props.editing) {
+      prevEditing.current = props.editing;
+      setReplyAnchor(null);
+      return;
+    }
+    const revised = prevEditing.current;
+    if (revised) {
+      prevEditing.current = null;
+      followEnd.current = false;
+      setReplyAnchor(revised.kind === 'goal' ? `goal:${revised.goalId}` : revised.kind);
+      return;
+    }
+    followEnd.current = true;
+    scrollRef.current?.scrollTo({ y: 100000, animated: true });
   }, [
-    editing,
+    props.editing,
     props.section,
     props.adjustIndex,
     props.adjustPhase,
@@ -164,6 +206,11 @@ export function MayaReflectionThread(props: {
     ...(props.coachLine ? [props.coachLine] : []),
     ...props.nextLines,
   ];
+  const replyTarget = replyFor(replyAnchor, {
+    section: props.section,
+    partnerCheckin: props.partnerCheckin,
+    coachCheckin: props.coachCheckin,
+  });
   const partnerQuestion =
     props.partners.length > 1
       ? REFLECTION_COPY.partnerQuestionMany
@@ -179,12 +226,20 @@ export function MayaReflectionThread(props: {
       contentContainerStyle={styles.content}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
+      scrollEventThrottle={16}
+      onScroll={(event) => {
+        scrollY.current = event.nativeEvent.contentOffset.y;
+      }}
+      onLayout={(event) => {
+        viewportH.current = event.nativeEvent.layout.height;
+      }}
       onContentSizeChange={() => {
         if (followEnd.current) {
           scrollRef.current?.scrollTo({ y: 100000, animated: true });
         }
       }}
     >
+      <View ref={contentRef} collapsable={false} style={styles.thread}>
       <View onLayout={(event) => { anchors.current.look = event.nativeEvent.layout.y; }}>
         <Divider label={REFLECTION_COPY.lookBack} />
       </View>
@@ -243,7 +298,11 @@ export function MayaReflectionThread(props: {
                     {answer && !editingThis ? (
                       <UserBubble text={answerLabel(answer)} onPress={() => props.onEditGoal(goalId)} />
                     ) : null}
-                    {answer && !editingThis ? <MayaBubble text={mayaAdjustLine(answer)} /> : null}
+                    {answer && !editingThis ? (
+                      <Reveal active={replyTarget === `goal:${goalId}`} onReveal={revealReply}>
+                        <MayaBubble text={mayaAdjustLine(answer)} />
+                      </Reveal>
+                    ) : null}
                     {answer && !editingThis ? props.renderGoal(goalId, answer) : null}
                     {current && answer && !editingThis ? (
                       <ChoiceButton
@@ -304,7 +363,9 @@ export function MayaReflectionThread(props: {
           props.partners.length > 0 &&
           (props.connectStep === 'partner' || props.connectStep === 'partner-follow' || props.partnerCheckin != null) ? (
             <>
-              <MayaBubble text={partnerQuestion} />
+              <Reveal active={replyTarget === 'connect-q'} onReveal={revealReply}>
+                <MayaBubble text={partnerQuestion} />
+              </Reveal>
               {(editing?.kind === 'partner' ||
                 (props.section === 'connect' && props.connectStep === 'partner' && !props.partnerCheckin)) &&
               props.partners.length > 0 ? (
@@ -326,7 +387,9 @@ export function MayaReflectionThread(props: {
           {props.partnerCheckin === 'yes' && editing?.kind !== 'partner' ? (
             <>
               <UserBubble text={REFLECTION_COPY.yes} onPress={props.onEditPartner} />
-              <MayaBubble text={MAYA_REFLECTION.partnerYes} />
+              <Reveal active={replyTarget === 'love'} onReveal={revealReply}>
+                <MayaBubble text={MAYA_REFLECTION.partnerYes} />
+              </Reveal>
               {props.section === 'connect' && props.connectStep === 'partner-follow' ? (
                 <ChoiceButton label={REFLECTION_COPY.next} onPress={props.onSkipToCoach} />
               ) : null}
@@ -337,7 +400,9 @@ export function MayaReflectionThread(props: {
               <UserBubble text={REFLECTION_COPY.notYet} onPress={props.onEditPartner} />
               {props.section === 'connect' && props.connectStep === 'partner-follow' ? (
                 <>
-                  <MayaBubble text={REFLECTION_COPY.partnerNote} />
+                  <Reveal active={replyTarget === 'note'} onReveal={revealReply}>
+                    <MayaBubble text={REFLECTION_COPY.partnerNote} />
+                  </Reveal>
                   <ChoiceButton label={REFLECTION_COPY.sendNote} onPress={props.onSendNote} />
                   <ChoiceButton label={REFLECTION_COPY.skip} onPress={props.onSkipToCoach} />
                 </>
@@ -352,7 +417,9 @@ export function MayaReflectionThread(props: {
           props.partners.length === 0 &&
           (props.connectStep === 'partner' || props.partnerCheckin != null) ? (
             <>
-              <MayaBubble text={REFLECTION_COPY.partnerInvite} />
+              <Reveal active={replyTarget === 'connect-q'} onReveal={revealReply}>
+                <MayaBubble text={REFLECTION_COPY.partnerInvite} />
+              </Reveal>
               {(editing?.kind === 'partner' ||
                 (props.section === 'connect' && props.connectStep === 'partner' && !props.partnerCheckin)) &&
               props.partners.length === 0 ? (
@@ -383,7 +450,9 @@ export function MayaReflectionThread(props: {
           props.coaches.length > 0 &&
           (props.connectStep === 'coach' || props.connectStep === 'coach-follow' || props.coachCheckin != null || editing?.kind === 'coach') ? (
             <>
-              <MayaBubble text={REFLECTION_COPY.coachQuestion} />
+              <Reveal active={replyTarget === 'coach-q'} onReveal={revealReply}>
+                <MayaBubble text={REFLECTION_COPY.coachQuestion} />
+              </Reveal>
               {editing?.kind === 'coach' || (props.section === 'connect' && props.connectStep === 'coach') ? (
                 <>
                   <ChoiceButton
@@ -409,7 +478,9 @@ export function MayaReflectionThread(props: {
           {!hideCoach && props.section === 'connect' && props.connectStep === 'coach-follow' && editing?.kind !== 'coach' ? (
             <>
               <UserBubble text={REFLECTION_COPY.notYet} onPress={props.onEditCoach} />
-              <MayaBubble text={REFLECTION_COPY.coachTime} />
+              <Reveal active={replyTarget === 'time'} onReveal={revealReply}>
+                <MayaBubble text={REFLECTION_COPY.coachTime} />
+              </Reveal>
               <ChoiceButton label={REFLECTION_COPY.setUpTime} onPress={props.onSetUpTime} />
               <ChoiceButton label={REFLECTION_COPY.skip} onPress={props.onSkipCoachTime} />
             </>
@@ -420,7 +491,9 @@ export function MayaReflectionThread(props: {
           props.coachRequestPending &&
           (props.connectStep === 'coach' || props.coachCheckin != null || editing?.kind === 'coach') ? (
             <>
-              <MayaBubble text={REFLECTION_COPY.coachPending} />
+              <Reveal active={replyTarget === 'coach-q'} onReveal={revealReply}>
+                <MayaBubble text={REFLECTION_COPY.coachPending} />
+              </Reveal>
               {editing?.kind === 'coach' || (props.section === 'connect' && props.connectStep === 'coach') ? (
                 <ChoiceButton label={REFLECTION_COPY.next} onPress={props.onCoachPendingNext} />
               ) : null}
@@ -432,11 +505,13 @@ export function MayaReflectionThread(props: {
           !props.coachRequestPending &&
           (props.connectStep === 'coach' || props.coachCheckin != null || editing?.kind === 'coach') ? (
             <>
-              <MayaBubble
-                text={
-                  props.coachBroughtBack ? MAYA_REFLECTION.coachBroughtBack : REFLECTION_COPY.coachOffer
-                }
-              />
+              <Reveal active={replyTarget === 'coach-q'} onReveal={revealReply}>
+                <MayaBubble
+                  text={
+                    props.coachBroughtBack ? MAYA_REFLECTION.coachBroughtBack : REFLECTION_COPY.coachOffer
+                  }
+                />
+              </Reveal>
               {editing?.kind === 'coach' || (props.section === 'connect' && props.connectStep === 'coach') ? (
                 <>
                   <ChoiceButton
@@ -480,7 +555,9 @@ export function MayaReflectionThread(props: {
           <View onLayout={(event) => { anchors.current.next = event.nativeEvent.layout.y; }}>
             <Divider label={REFLECTION_COPY.nextWeek} />
           </View>
-          <MayaBubble text={MAYA_REFLECTION.nextIntro} />
+          <Reveal active={replyTarget === 'next'} onReveal={revealReply}>
+            <MayaBubble text={MAYA_REFLECTION.nextIntro} />
+          </Reveal>
           {props.section === 'next' && props.nextEmpty ? (
             <>
               <MayaBubble text={REFLECTION_COPY.allSet} />
@@ -519,7 +596,68 @@ export function MayaReflectionThread(props: {
           </Pressable>
         </>
       ) : null}
+      </View>
     </ScrollView>
+  );
+}
+
+function replyFor(
+  anchor: string | null,
+  state: {
+    section: ReflectionSection;
+    partnerCheckin: ReflectionDraft['partnerCheckin'];
+    coachCheckin: ReflectionDraft['coachCheckin'];
+  },
+): string | null {
+  if (!anchor) {
+    return null;
+  }
+  if (anchor.startsWith('goal:')) {
+    return anchor;
+  }
+  if (anchor === 'others') {
+    return state.section === 'next' ? 'next' : 'connect-q';
+  }
+  if (anchor === 'partner') {
+    if (state.section === 'next') {
+      return 'next';
+    }
+    if (state.partnerCheckin === 'yes') {
+      return 'love';
+    }
+    if (state.partnerCheckin === 'not_yet') {
+      return 'note';
+    }
+    return 'coach-q';
+  }
+  if (anchor === 'coach') {
+    return state.coachCheckin === 'not_yet' ? 'time' : 'next';
+  }
+  return null;
+}
+
+function Reveal({
+  active,
+  onReveal,
+  children,
+}: {
+  active: boolean;
+  onReveal: (node: ViewInstance) => void;
+  children: ReactNode;
+}) {
+  const ref = useRef<ViewInstance>(null);
+  useEffect(() => {
+    if (!active || !ref.current) {
+      return;
+    }
+    const node = ref.current;
+    const timer = setTimeout(() => onReveal(node), 50);
+    return () => clearTimeout(timer);
+  }, [active, onReveal]);
+  return (
+    <View ref={ref} collapsable={false}>
+      {children}
+    </View>
   );
 }
 
@@ -595,8 +733,10 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
-    gap: 12,
     paddingBottom: 32,
+  },
+  thread: {
+    gap: 12,
   },
   step: {
     gap: 12,

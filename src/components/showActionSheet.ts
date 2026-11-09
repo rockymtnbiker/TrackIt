@@ -5,10 +5,12 @@ export function showActionSheet(
   title: string,
   options: string[],
   onPick: (index: number) => void,
+  destructiveOptions?: string[],
 ) {
   const labels = [...options, 'Cancel'];
   const cancel = labels.length - 1;
-  const destructive = options.findIndex((option) => option === 'Clear today');
+  const destructiveNames = destructiveOptions ?? ['Clear today'];
+  const destructive = options.findIndex((option) => destructiveNames.includes(option));
   if (Platform.OS === 'ios') {
     ActionSheetIOS.showActionSheetWithOptions(
       {
@@ -30,7 +32,7 @@ export function showActionSheet(
     [
       ...options.map((text, index) => ({
         text,
-        style: (text === 'Clear today' ? 'destructive' : 'default') as
+        style: (destructiveNames.includes(text) ? 'destructive' : 'default') as
           | 'destructive'
           | 'default',
         onPress: () => onPick(index),

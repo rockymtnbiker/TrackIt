@@ -2,10 +2,10 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NavigatorScreenParams } from '@react-navigation/native';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CommunityProvider, useCommunity } from '../context/CommunityContext';
-import CommentThreadScreen from '../screens/CommentThreadScreen';
+import ChatScreen from '../screens/ChatScreen';
 import PartnerScreen from '../screens/PartnerScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import WeeklyReflectionScreen from '../screens/WeeklyReflectionScreen';
@@ -14,7 +14,7 @@ import GoalSetupScreen from '../screens/GoalSetupScreen';
 import TodayScreen from '../screens/TodayScreen';
 import CommunityStackNavigator from './CommunityStackNavigator';
 import GoalsStackNavigator, {
-  type CommentThreadParams,
+  type ChatParams,
   type GoalRouteParams,
   type TodayStackParamList,
 } from './GoalsStackNavigator';
@@ -33,8 +33,8 @@ export type DashboardStackParamList = {
   WeeklyReflection: { weekStart: string; readOnly?: boolean };
   Partner: { connectionId: string; name: string; partnerId: string | null };
   Goal: GoalRouteParams;
+  Chat: ChatParams;
   StepDetail: { goalId: string };
-  Comments: CommentThreadParams;
 };
 
 const Tab = createMaterialTopTabNavigator<RootTabParamList>();
@@ -61,9 +61,9 @@ function TodayStackNavigator() {
         options={{ title: '', headerTitleAlign: 'center' }}
       />
       <TodayStack.Screen
-        name="Comments"
-        component={CommentThreadScreen}
-        options={{ title: 'Comments', headerTitleAlign: 'center' }}
+        name="Chat"
+        component={ChatScreen}
+        options={{ headerTitleAlign: 'center' }}
       />
     </TodayStack.Navigator>
   );
@@ -97,9 +97,9 @@ function DashboardStackNavigator() {
         options={{ title: '', headerTitleAlign: 'center' }}
       />
       <DashboardStack.Screen
-        name="Comments"
-        component={CommentThreadScreen}
-        options={{ title: 'Comments', headerTitleAlign: 'center' }}
+        name="Chat"
+        component={ChatScreen}
+        options={{ headerTitleAlign: 'center' }}
       />
       <DashboardStack.Screen
         name="Partner"
@@ -113,18 +113,17 @@ function DashboardStackNavigator() {
   );
 }
 
-function InviteBadge({ count }: { count: number }) {
-  const label = count > 99 ? '99+' : String(count);
+function ConnectDot() {
   return (
-    <View style={styles.badge} accessibilityLabel={`${label} incoming invites`}>
-      <Text style={styles.badgeText}>{label}</Text>
+    <View style={styles.dotRing} accessibilityLabel="New activity">
+      <View style={styles.dot} />
     </View>
   );
 }
 
 function TabScreens() {
   const insets = useSafeAreaInsets();
-  const { incomingCount } = useCommunity();
+  const { hasAttention } = useCommunity();
   const tabBarHeight = 49 + insets.bottom;
 
   return (
@@ -216,19 +215,17 @@ function TabScreens() {
         component={CommunityStackNavigator}
         options={{
           tabBarLabel: 'Connect',
-          tabBarAccessibilityLabel:
-            incomingCount > 0
-              ? `Connect, ${incomingCount} incoming invites`
-              : 'Connect',
-          tabBarBadge:
-            incomingCount > 0 ? () => <InviteBadge count={incomingCount} /> : undefined,
+          tabBarAccessibilityLabel: hasAttention ? 'Connect, new activity' : 'Connect',
           tabBarIcon: ({ focused, color }) => (
-            <MaterialCommunityIcons
-              name={focused ? 'handshake' : 'handshake-outline'}
-              size={24}
-              color={color}
-              style={styles.tabIcon}
-            />
+            <View style={styles.connectIcon} collapsable={false}>
+              <MaterialCommunityIcons
+                name={focused ? 'handshake' : 'handshake-outline'}
+                size={24}
+                color={color}
+                style={styles.tabIcon}
+              />
+              {hasAttention ? <ConnectDot /> : null}
+            </View>
           ),
         }}
       />
@@ -248,18 +245,25 @@ const styles = StyleSheet.create({
   tabIcon: {
     marginTop: 2,
   },
-  badge: {
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    paddingHorizontal: 4,
-    backgroundColor: '#ff3b30',
+  connectIcon: {
+    overflow: 'visible',
+  },
+  dotRing: {
+    position: 'absolute',
+    // 24pt icon, 2pt top margin. About a third of the 10pt dot covers its top-right corner.
+    top: -7,
+    right: -9,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#007AFF',
   },
 });

@@ -1,14 +1,15 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import BlockedScreen from '../screens/BlockedScreen';
-import CommentThreadScreen from '../screens/CommentThreadScreen';
+import ChatScreen from '../screens/ChatScreen';
 import CommunityScreen from '../screens/CommunityScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import GoalScreen from '../screens/GoalScreen';
 import LearnScreen from '../screens/LearnScreen';
 import PartnerScreen from '../screens/PartnerScreen';
 import MayaFlowScreen from '../screens/MayaFlowScreen';
+import MayaHomeScreen from '../screens/MayaHomeScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import type { CommentThreadParams, GoalRouteParams } from './GoalsStackNavigator';
+import type { ChatParams, GoalRouteParams } from './GoalsStackNavigator';
 
 export type CommunityStackParamList = {
   CommunityMain:
@@ -19,11 +20,12 @@ export type CommunityStackParamList = {
       }
     | undefined;
   Learn: undefined;
+  MayaHome: undefined;
   Maya: undefined;
   Partner: { connectionId: string; name: string; partnerId: string | null };
+  Chat: ChatParams;
   Blocked: undefined;
   Goal: GoalRouteParams;
-  Comments: CommentThreadParams;
   Profile: undefined;
   DeleteAccount: undefined;
 };
@@ -52,6 +54,15 @@ export default function CommunityStackNavigator() {
         }}
       />
       <Stack.Screen
+        name="MayaHome"
+        component={MayaHomeScreen}
+        options={{
+          title: 'Maya',
+          headerTitleAlign: 'center',
+          headerBackTitle: 'Connect',
+        }}
+      />
+      <Stack.Screen
         name="Maya"
         component={MayaFlowScreen}
         options={{
@@ -76,6 +87,14 @@ export default function CommunityStackNavigator() {
         options={{ title: 'Delete account', headerTitleAlign: 'center' }}
       />
       <Stack.Screen
+        name="Chat"
+        component={ChatScreen}
+        options={{
+          headerTitleAlign: 'center',
+          headerBackTitle: 'Connect',
+        }}
+      />
+      <Stack.Screen
         name="Partner"
         component={PartnerScreen}
         options={({ route }) => ({
@@ -92,11 +111,6 @@ export default function CommunityStackNavigator() {
         name="Goal"
         component={GoalScreen}
         options={{ title: '', headerTitleAlign: 'center' }}
-      />
-      <Stack.Screen
-        name="Comments"
-        component={CommentThreadScreen}
-        options={{ title: 'Comments', headerTitleAlign: 'center' }}
       />
     </Stack.Navigator>
   );

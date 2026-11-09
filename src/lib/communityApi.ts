@@ -1,4 +1,4 @@
-import type { Connection, GoalComment, GoalShare } from '../types/community';
+import type { Connection, GoalShare } from '../types/community';
 import type { Goal, GoalEntry, GoalStatus, RepeatPeriod } from '../types/goal';
 import { localCalendarDay, normalizeDateOnly } from './localDate';
 import { ENTRIES_TABLE, GOALS_TABLE, amountToNumber } from './goalTables';
@@ -76,18 +76,6 @@ type EntryRow = {
 };
 
 const SHARE_COLUMNS = 'goal_id, owner_id, viewer_id, created_at';
-const COMMENT_COLUMNS =
-  'id, goal_id, owner_id, partner_id, author_id, body, created_at';
-
-type CommentRow = {
-  id: string;
-  goal_id: string;
-  owner_id: string;
-  partner_id: string;
-  author_id: string;
-  body: string | null;
-  created_at: string | null;
-};
 
 function blankToNull(value: string | null | undefined): string | null {
   if (value == null) {
@@ -428,33 +416,7 @@ export async function getGoalsSharedWithMe(partnerId: string): Promise<SharedGoa
   };
 }
 
-function commentAuthorName(
-  authorId: string,
-  userId: string,
-  connections: Connection[],
-): string {
-  if (authorId === userId) {
-    return 'You';
-  }
-  const match = connections.find((connection) => connection.partnerId === authorId);
-  return match?.displayName?.trim() || match?.email?.trim() || 'Workout partner';
-}
-
-function mapComment(row: CommentRow, userId: string, connections: Connection[]): GoalComment {
-  return {
-    id: row.id,
-    goalId: row.goal_id,
-    ownerId: row.owner_id,
-    partnerId: row.partner_id,
-    authorId: row.author_id,
-    authorName: commentAuthorName(row.author_id, userId, connections),
-    body: row.body ?? '',
-    createdAt: row.created_at ?? '',
-    mine: row.author_id === userId,
-  };
-}
-
-/** Shares of one of my goals. Each viewer is a comment thread partner. */
+/** Shares of one of my goals. */
 export async function getSharesForGoal(goalId: string): Promise<GoalShare[]> {
   const userId = await requireUserId();
   const { data, error } = await supabase
@@ -468,93 +430,4 @@ export async function getSharesForGoal(goalId: string): Promise<GoalShare[]> {
   }
 
   return ((data as GoalShareRow[] | null) ?? []).map(mapShare);
-}
-
-/** One goal shared with one partner, oldest comment first. */
-export async function getThread(
-  goalId: string,
-  ownerId: string,
-  partnerId: string,
-): Promise<GoalComment[]> {
-  const userId = await requireUserId();
-  const [{ data, error }, connections] = await Promise.all([
-    supabase
-      .from('goal_comments')
-      .select(COMMENT_COLUMNS)
-      .eq('goal_id', goalId)
-      .eq('owner_id', ownerId)
-      .eq('partner_id', partnerId)
-      .order('created_at', { ascending: true }),
-    getMyConnections(),
-  ]);
-
-  if (error) {
-    throw error;
-  }
-
-  return ((data as CommentRow[] | null) ?? []).map((row) =>
-    mapComment(row, userId, connections),
-  );
-}
-
-export async function postComment(
-  goalId: string,
-  ownerId: string,
-  partnerId: string,
-  body: string,
-): Promise<GoalComment> {
-  const userId = await requireUserId();
-  const trimmed = body.trim();
-  if (trimmed.length < 1 || trimmed.length > 1000) {
-    throw new Error('Comment must be 1–1000 characters.');
-  }
-
-  const { data, error } = await supabase
-    .from('goal_comments')
-    .insert({
-      goal_id: goalId,
-      owner_id: ownerId,
-      partner_id: partnerId,
-      author_id: userId,
-      body: trimmed,
-    })
-    .select(COMMENT_COLUMNS)
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return mapComment(data as CommentRow, userId, []);
-}
-
-export async function deleteComment(id: string): Promise<void> {
-  const userId = await requireUserId();
-  const { data, error } = await supabase
-    .from('goal_comments')
-    .delete()
-    .eq('id', id)
-    .eq('author_id', userId)
-    .select('id');
-
-  if (error) {
-    throw error;
-  }
-  if (!data || data.length === 0) {
-    throw new Error('You can only delete your own comments.');
-  }
-}
-
-export async function reportComment(id: string, reason?: string): Promise<void> {
-  const userId = await requireUserId();
-  const trimmed = reason?.trim() ?? '';
-  const { error } = await supabase.from('comment_reports').insert({
-    comment_id: id,
-    reporter_id: userId,
-    reason: trimmed.length > 0 ? trimmed : null,
-  });
-
-  if (error) {
-    throw error;
-  }
 }

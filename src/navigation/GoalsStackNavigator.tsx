@@ -1,5 +1,5 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import CommentThreadScreen from '../screens/CommentThreadScreen';
+import ChatScreen from '../screens/ChatScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalSetupScreen from '../screens/GoalSetupScreen';
@@ -19,12 +19,13 @@ export type GoalRouteParams = {
   fromReflection?: boolean;
 };
 
-export type CommentThreadParams = {
-  goalId: string;
-  ownerId: string;
-  partnerId: string;
-  goalTitle: string;
-  partnerName: string;
+export type ChatParams = {
+  connectionId: string;
+  otherId: string | null;
+  otherName: string;
+  role: 'partner' | 'coach';
+  /** Top-level goal to tag on messages until the chip is removed. */
+  goalId?: string;
   /** Opened from the weekly reflection's "Send a note". */
   fromReflection?: boolean;
 };
@@ -33,18 +34,18 @@ export type GoalsStackParamList = {
   GoalsList: undefined;
   GoalSetup: undefined;
   Goal: GoalRouteParams;
+  Chat: ChatParams;
   Profile: undefined;
   DeleteAccount: undefined;
   StepDetail: { goalId: string };
-  Comments: CommentThreadParams;
 };
 
 export type TodayStackParamList = {
   TodayMain: { focusToday?: number; freshGoalId?: string } | undefined;
   GoalSetup: undefined;
   Goal: GoalRouteParams;
+  Chat: ChatParams;
   StepDetail: { goalId: string };
-  Comments: CommentThreadParams;
 };
 
 const Stack = createNativeStackNavigator<GoalsStackParamList>();
@@ -68,9 +69,9 @@ export default function GoalsStackNavigator() {
         options={{ title: '', headerTitleAlign: 'center' }}
       />
       <Stack.Screen
-        name="Comments"
-        component={CommentThreadScreen}
-        options={{ title: 'Comments', headerTitleAlign: 'center' }}
+        name="Chat"
+        component={ChatScreen}
+        options={{ headerTitleAlign: 'center' }}
       />
       <Stack.Screen
         name="Profile"

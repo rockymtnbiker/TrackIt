@@ -31,7 +31,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { celebrateBadges } from '../lib/badgeCelebration';
 import { checkBadges } from '../lib/badges';
-import { getMyConnections, getMySharesWith } from '../lib/communityApi';
+import { getMyConnections } from '../lib/communityApi';
 import { getLatestSupportRequest } from '../lib/supportApi';
 import { getAllGoals, getEntries, reorderGoals, updateGoal } from '../lib/goalTreeApi';
 import { parseLocalDate, todayLocal } from '../lib/localDate';
@@ -43,6 +43,7 @@ import {
   type ReflectionDraft,
   type ReflectionSection,
 } from '../lib/reflectionDraft';
+import { takeReflectionNoteSent } from '../lib/reflectionNote';
 import { cancelThisWeeksReflectionReminder } from '../lib/reminders';
 import {
   getReview,
@@ -229,6 +230,7 @@ export default function WeeklyReflectionScreen({ navigation, route }: Props) {
   const [nextStepIds, setNextStepIds] = useState<{ goalId: string; stepId: string }[]>([]);
   const [nextIndex, setNextIndex] = useState(0);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [noteChoices, setNoteChoices] = useState<Connection[] | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
@@ -307,7 +309,7 @@ export default function WeeklyReflectionScreen({ navigation, route }: Props) {
             setChanges((existing) => [...existing, ...lines]);
           }
         }
-        const noteName = pendingNoteName.current;
+        const noteName = pendingNoteName.current ?? takeReflectionNoteSent();
         if (noteName) {
           pendingNoteName.current = null;
           setPartnerCheckin('not_yet');
@@ -594,6 +596,60 @@ export default function WeeklyReflectionScreen({ navigation, route }: Props) {
     ]);
   };
 
+  const clearAfterAdjust = () => {
+    setConnectStep('partner');
+    setPartnerCheckin(null);
+    setCoachCheckin(null);
+    setNextStepIds([]);
+    setNextIndex(0);
+    setNoteSentTo(null);
+    setNoteAwaitingReturn(null);
+  };
+
+  const reviseMaya = (point: ReflectionEdit) => {
+    setEditing(point);
+    if (point.kind === 'goal') {
+      const index = pickedIds.indexOf(point.goalId);
+      if (index < 0) {
+        return;
+      }
+      const keep = new Set(pickedIds.slice(0, index + 1));
+      setAdjustIndex(index);
+      setAdjustPhase('one');
+      setExtraId(null);
+      setViewedExtraIds([]);
+      setAnswers((current) => current.filter((item) => keep.has(item.goal_id)));
+      setSection('adjust');
+      setReached('adjust');
+      clearAfterAdjust();
+      return;
+    }
+    if (point.kind === 'others') {
+      setAdjustPhase('others');
+      setExtraId(null);
+      setSection('adjust');
+      setReached('adjust');
+      clearAfterAdjust();
+      return;
+    }
+    if (point.kind === 'partner') {
+      setSection('connect');
+      setReached('connect');
+      setConnectStep('partner');
+      setCoachCheckin(null);
+      setNextStepIds([]);
+      setNextIndex(0);
+      setNoteSentTo(null);
+      setNoteAwaitingReturn(null);
+      return;
+    }
+    setSection('connect');
+    setReached('connect');
+    setConnectStep('coach');
+    setNextStepIds([]);
+    setNextIndex(0);
+  };
+
   const finishPicked = () => {
     if (adjustIndex < pickedIds.length - 1) {
       setAdjustIndex((index) => index + 1);
@@ -620,42 +676,32 @@ export default function WeeklyReflectionScreen({ navigation, route }: Props) {
     setConnectStep('coach');
   };
 
-  const openPartnerNote = async () => {
-    const partner = [...partners].sort((a, b) => personName(a).localeCompare(personName(b)))[0];
-    if (!partner?.partnerId) {
+  const openNoteChat = (connection: Connection) => {
+    if (!connection.partnerId) {
       return;
     }
-    try {
-      const shares = await getMySharesWith(partner.partnerId);
-      const shared = new Set(shares.map((share) => share.goalId));
-      const goal = nodes.find((item) => shared.has(item.id));
-      if (!goal || !user?.id) {
-        navigation.navigate('Partner', {
-          connectionId: partner.id,
-          name: personName(partner),
-          partnerId: partner.partnerId,
-        });
-        return;
-      }
-      const name = personName(partner);
-      pendingNoteName.current = name;
-      setNoteAwaitingReturn(name);
-      navigation.navigate('Comments', {
-        goalId: goal.id,
-        ownerId: user.id,
-        partnerId: partner.partnerId,
-        goalTitle: goal.title || 'Untitled',
-        partnerName: name,
-        fromReflection: true,
-      });
-    } catch (error) {
-      pendingNoteName.current = null;
-      setNoteAwaitingReturn(null);
-      Alert.alert(
-        REFLECTION_COPY.couldNotFinish,
-        error instanceof Error ? error.message : REFLECTION_COPY.couldNotFinish,
-      );
+    setNoteChoices(null);
+    navigation.navigate('Chat', {
+      connectionId: connection.id,
+      otherId: connection.partnerId,
+      otherName: personName(connection),
+      role: connection.role === 'coach' ? 'coach' : 'partner',
+      fromReflection: true,
+    });
+  };
+
+  const openPartnerNote = () => {
+    const choices = [...partners]
+      .filter((connection) => connection.partnerId)
+      .sort((a, b) => personName(a).localeCompare(personName(b)));
+    if (choices.length === 0) {
+      return;
     }
+    if (choices.length === 1) {
+      openNoteChat(choices[0]);
+      return;
+    }
+    setNoteChoices(choices);
   };
 
   const nextGoalIds = [...pickedIds, ...viewedExtraIds.filter((id) => !pickedIds.includes(id))];
@@ -801,6 +847,37 @@ export default function WeeklyReflectionScreen({ navigation, route }: Props) {
         />
       ) : null}
       <Modal
+        visible={noteChoices != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNoteChoices(null)}
+      >
+        <Pressable style={styles.backdrop} onPress={() => setNoteChoices(null)}>
+          <Pressable style={styles.confirmCard} onPress={() => {}}>
+            <Text style={styles.question}>{REFLECTION_COPY.sendNote}</Text>
+            {noteChoices?.map((connection) => (
+              <Pressable
+                key={connection.id}
+                onPress={() => openNoteChat(connection)}
+                style={({ pressed }) => [styles.choice, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel={personName(connection)}
+              >
+                <Text style={styles.choiceText}>{personName(connection)}</Text>
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => setNoteChoices(null)}
+              style={({ pressed }) => [styles.choice, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel={REFLECTION_COPY.cancel}
+            >
+              <Text style={styles.choiceText}>{REFLECTION_COPY.cancel}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+      <Modal
         visible={confirmOver}
         transparent
         animationType="fade"
@@ -852,10 +929,10 @@ export default function WeeklyReflectionScreen({ navigation, route }: Props) {
         <MayaReflectionThread
           section={section}
           editing={editing}
-          onEditGoal={(goalId) => setEditing({ kind: 'goal', goalId })}
-          onEditOthers={() => setEditing({ kind: 'others' })}
-          onEditPartner={() => setEditing({ kind: 'partner' })}
-          onEditCoach={() => setEditing({ kind: 'coach' })}
+          onEditGoal={(goalId) => reviseMaya({ kind: 'goal', goalId })}
+          onEditOthers={() => reviseMaya({ kind: 'others' })}
+          onEditPartner={() => reviseMaya({ kind: 'partner' })}
+          onEditCoach={() => reviseMaya({ kind: 'coach' })}
           scrollTarget={scrollTarget}
           dayName={WEEKDAY_NAMES[settings.reflectionDay]}
           loading={loading}
@@ -887,10 +964,7 @@ export default function WeeklyReflectionScreen({ navigation, route }: Props) {
             }
           }}
           onImGood={() => {
-            if (editing?.kind === 'others') {
-              setEditing(null);
-              return;
-            }
+            setEditing(null);
             setSection('connect');
           }}
           onCloseExtra={() => {

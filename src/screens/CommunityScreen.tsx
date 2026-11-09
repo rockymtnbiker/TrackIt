@@ -20,6 +20,7 @@ import { InviteCodeSheet, RedeemInviteSheet } from '../components/InviteCodeShee
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { SupportRequestSheet } from '../components/SupportRequestSheet';
 import { WhatsComing } from '../components/WhatsComing';
+import { useAuth } from '../context/AuthContext';
 import { useCommunity } from '../context/CommunityContext';
 import {
   cancelInvite,
@@ -34,6 +35,7 @@ import {
   type PartnerInvite,
 } from '../lib/invitesApi';
 import { localCalendarDay } from '../lib/localDate';
+import type { ConnectionSummary } from '../lib/messagesApi';
 import { getLatestSupportRequest, type HelpType, type SupportRequest } from '../lib/supportApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
 import type { Connection } from '../types/community';
@@ -106,8 +108,68 @@ function isEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function byRecent(
+  connections: Connection[],
+  summaries: Map<string, ConnectionSummary>,
+): Connection[] {
+  return [...connections].sort((a, b) => {
+    const aTime = summaries.get(a.id)?.lastMessage?.createdAt ?? '';
+    const bTime = summaries.get(b.id)?.lastMessage?.createdAt ?? '';
+    if (aTime !== bTime) {
+      if (!aTime) {
+        return 1;
+      }
+      if (!bTime) {
+        return -1;
+      }
+      return bTime.localeCompare(aTime);
+    }
+    return partnerLabel(a).localeCompare(partnerLabel(b));
+  });
+}
+
+function messagePreview(summary: ConnectionSummary | undefined, userId: string | undefined): string {
+  const body = summary?.lastMessage?.body.trim() ?? '';
+  if (!summary?.lastMessage || !body) {
+    return 'No messages yet';
+  }
+  if (userId && summary.lastMessage.senderId === userId) {
+    return `You: ${body}`;
+  }
+  return body;
+}
+
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) {
+    return '';
+  }
+  const minutes = Math.floor((Date.now() - then) / 60000);
+  if (minutes < 1) {
+    return 'now';
+  }
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function initial(name: string): string {
+  const letter = name.trim().charAt(0).toUpperCase();
+  return letter || '?';
+}
+
+function roleLabel(role: Connection['role']): string {
+  return role === 'coach' ? 'Achievement Coach' : 'Accountability partner';
+}
+
 export default function CommunityScreen({ navigation, route }: Props) {
-  const { refreshConnections } = useCommunity();
+  const { user } = useAuth();
+  const { refreshConnections, summaries } = useCommunity();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -124,6 +186,7 @@ export default function CommunityScreen({ navigation, route }: Props) {
   const [codeInvites, setCodeInvites] = useState<PendingCode[]>([]);
   const [codeSheet, setCodeSheet] = useState<CodeSheetRequest | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
+  const [inviteMenu, setInviteMenu] = useState(false);
 
   useEffect(() => {
     if (route.params?.openSupport !== 'setup') {
@@ -212,14 +275,21 @@ export default function CommunityScreen({ navigation, route }: Props) {
   );
   const incoming = pending.filter((connection) => connection.incoming === true);
   const outgoing = pending.filter((connection) => connection.incoming === false);
-  const partners = visible
-    .filter((connection) => connection.status.toLowerCase() === 'accepted')
-    .sort((a, b) => partnerLabel(a).localeCompare(partnerLabel(b)));
+  const accepted = visible.filter(
+    (connection) => connection.status.toLowerCase() === 'accepted',
+  );
+  const coaches = byRecent(
+    accepted.filter((connection) => connection.role === 'coach'),
+    summaries,
+  );
+  const partners = byRecent(
+    accepted.filter((connection) => connection.role !== 'coach'),
+    summaries,
+  );
   const blocked = visible
     .filter((connection) => blockedByMe(connection))
     .sort((a, b) => partnerLabel(a).localeCompare(partnerLabel(b)));
-  const hasInvites = incoming.length > 0 || outgoing.length > 0;
-  const isEmpty = !hasInvites && partners.length === 0;
+  const hasRequests = incoming.length > 0 || outgoing.length > 0 || codeInvites.length > 0;
 
   const runInviteAction = async (id: string, action: () => Promise<unknown>) => {
     if (busyId) {
@@ -270,21 +340,79 @@ export default function CommunityScreen({ navigation, route }: Props) {
     ? localCalendarDay(latestRequest.createdAt)
     : '';
 
+  const openCodeInvite = () => {
+    setInviteMenu(false);
+    setCodeSheet({ title: 'Invite with a code' });
+  };
+
+  const renderPerson = (connection: Connection) => {
+    const name = partnerLabel(connection);
+    const summary = summaries.get(connection.id);
+    const preview = messagePreview(summary, user?.id);
+    const when = summary?.lastMessage?.createdAt
+      ? relativeTime(summary.lastMessage.createdAt)
+      : '';
+    const unread = summary?.unread === true;
+    return (
+      <Pressable
+        onPress={() =>
+          navigation.navigate('Chat', {
+            connectionId: connection.id,
+            otherId: connection.partnerId,
+            otherName: name,
+            role: connection.role === 'coach' ? 'coach' : 'partner',
+          })
+        }
+        style={({ pressed }) => [styles.personRow, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={`${name}, ${roleLabel(connection.role)}, ${preview}${unread ? ', unread' : ''}`}
+      >
+        <View style={styles.personAvatar}>
+          <Text style={styles.personInitial}>{initial(name)}</Text>
+        </View>
+        <View style={styles.personBody}>
+          <Text style={styles.personName} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={styles.personRole}>{roleLabel(connection.role)}</Text>
+          <Text style={styles.personPreview} numberOfLines={1}>
+            {preview}
+          </Text>
+        </View>
+        <View style={styles.personMeta}>
+          {when ? <Text style={styles.personTime}>{when}</Text> : null}
+          {unread ? <View style={styles.unreadDot} accessibilityLabel="Unread" /> : null}
+        </View>
+      </Pressable>
+    );
+  };
+
   return (
     <View style={styles.screen}>
       <PageHeader
         title="Connect"
-        subtitle="Partners, help, and what's coming"
+        subtitle="The people helping you reach your goals"
         right={
-          <Pressable
-            onPress={() => navigation.navigate('Profile')}
-            accessibilityRole="button"
-            accessibilityLabel="Profile"
-            hitSlop={8}
-            style={({ pressed }) => pressed && styles.pressed}
-          >
-            <Ionicons name="person-circle" size={28} color="#111" />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              onPress={() => navigation.navigate('Profile')}
+              accessibilityRole="button"
+              accessibilityLabel="Profile"
+              hitSlop={8}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <Ionicons name="person-circle" size={28} color="#111" />
+            </Pressable>
+            <Pressable
+              onPress={() => setInviteMenu(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Invite"
+              hitSlop={8}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <Text style={styles.headerInvite}>+ Invite</Text>
+            </Pressable>
+          </View>
         }
       />
       <ScrollView
@@ -296,265 +424,244 @@ export default function CommunityScreen({ navigation, route }: Props) {
             onRefresh={() => {
               setRefreshing(true);
               void load();
+              void loadCodes();
               void loadLatestRequest();
             }}
             tintColor="#007aff"
           />
         }
       >
-        <Pressable
-          onPress={() => navigation.navigate('Maya')}
-          style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Work on a goal with Maya. Answer a few questions and find where to start."
-        >
-          <View style={styles.actionText}>
-            <Text style={styles.actionTitle}>Work on a goal with Maya</Text>
-            <Text style={styles.actionBody}>
-              Answer a few questions and find where to start.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-        </Pressable>
-
-        <Pressable
-          onPress={() => navigation.navigate('Learn')}
-          style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Learn. Videos and quick reads on setting and reaching goals"
-        >
-          <View style={styles.actionText}>
-            <Text style={styles.actionTitle}>Learn</Text>
-            <Text style={styles.actionBody}>
-              Videos and quick reads on setting and reaching goals
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-        </Pressable>
-
-        <Pressable
-          onPress={() => {
-            setRequestHelp(null);
-            setRequestOpen(true);
-          }}
-          style={({ pressed }) => [styles.actionCard, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Talk to someone. Get help from a real person, from setting up goals to the bigger stuff."
-        >
-          <View style={styles.actionText}>
-            <Text style={styles.actionTitle}>Talk to someone</Text>
-            <Text style={styles.actionBody}>
-              Get help from a real person, from setting up goals to the bigger stuff.
-            </Text>
-            {requestSentDay ? (
-              <Text style={styles.requestSent}>Request sent · {formatDate(requestSentDay)}</Text>
-            ) : null}
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-        </Pressable>
+        {loadError ? <Text style={styles.errorText}>{loadError}</Text> : null}
 
         {loading && connections.length === 0 ? (
           <ActivityIndicator color="#007aff" style={styles.partnersLoading} />
         ) : (
           <>
-        <View style={styles.inviteRow}>
-          <Pressable
-            onPress={() => setInviteOpen(true)}
-            style={({ pressed }) => [styles.inviteButton, styles.inviteButtonHalf, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Invite partner"
-          >
-            <Text style={styles.inviteButtonText}>+ Invite workout partner</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setCodeSheet({ title: 'Invite with a code' })}
-            style={({ pressed }) => [styles.inviteButton, styles.inviteButtonHalf, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Invite with a code"
-          >
-            <Text style={styles.inviteButtonText}>Invite with a code</Text>
-          </Pressable>
-        </View>
-        <Pressable
-          onPress={() => setRedeemOpen(true)}
-          style={({ pressed }) => [styles.codeRow, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Have an invite code?"
-        >
-          <Text style={styles.codeRowLabel}>Have an invite code?</Text>
-          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-        </Pressable>
-
-        {loadError ? <Text style={styles.errorText}>{loadError}</Text> : null}
-
-        {hasInvites ? (
-          <>
-            <Text style={styles.section}>Invites</Text>
-            <View style={styles.card}>
-              {incoming.map((connection, index) => (
-                <View key={connection.id}>
-                  {index > 0 ? <View style={styles.separator} /> : null}
-                  <View style={styles.inviteBlock}>
-                    <Text style={styles.inviteText}>
-                      {partnerLabel(connection)} wants to be your workout partner
-                    </Text>
-                    <View style={styles.inviteActions}>
-                      {busyId === connection.id ? (
-                        <ActivityIndicator color="#007aff" />
-                      ) : (
-                        <>
-                          <Pressable
-                            onPress={() =>
-                              void runInviteAction(connection.id, () =>
-                                respondToInvite(connection.id, true),
-                              )
-                            }
-                            disabled={busyId != null}
-                            style={({ pressed }) => pressed && styles.pressed}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Accept ${partnerLabel(connection)}`}
-                          >
-                            <Text style={styles.accept}>Accept</Text>
-                          </Pressable>
-                          <Pressable
-                            onPress={() =>
-                              void runInviteAction(connection.id, () =>
-                                respondToInvite(connection.id, false),
-                              )
-                            }
-                            disabled={busyId != null}
-                            style={({ pressed }) => pressed && styles.pressed}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Decline ${partnerLabel(connection)}`}
-                          >
-                            <Text style={styles.decline}>Decline</Text>
-                          </Pressable>
-                        </>
-                      )}
+            {hasRequests ? (
+              <>
+                <Text style={styles.section}>Requests</Text>
+                <View style={styles.card}>
+                  {incoming.map((connection, index) => (
+                    <View key={connection.id}>
+                      {index > 0 ? <View style={styles.separator} /> : null}
+                      <View style={styles.inviteBlock}>
+                        <Text style={styles.inviteText}>
+                          {partnerLabel(connection)} wants to be your workout partner
+                        </Text>
+                        <View style={styles.inviteActions}>
+                          {busyId === connection.id ? (
+                            <ActivityIndicator color="#007aff" />
+                          ) : (
+                            <>
+                              <Pressable
+                                onPress={() =>
+                                  void runInviteAction(connection.id, () =>
+                                    respondToInvite(connection.id, true),
+                                  )
+                                }
+                                disabled={busyId != null}
+                                style={({ pressed }) => pressed && styles.pressed}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Accept ${partnerLabel(connection)}`}
+                              >
+                                <Text style={styles.accept}>Accept</Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={() =>
+                                  void runInviteAction(connection.id, () =>
+                                    respondToInvite(connection.id, false),
+                                  )
+                                }
+                                disabled={busyId != null}
+                                style={({ pressed }) => pressed && styles.pressed}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Decline ${partnerLabel(connection)}`}
+                              >
+                                <Text style={styles.decline}>Decline</Text>
+                              </Pressable>
+                            </>
+                          )}
+                        </View>
+                      </View>
                     </View>
-                  </View>
-                </View>
-              ))}
-              {outgoing.map((connection, index) => (
-                <View key={connection.id}>
-                  {incoming.length > 0 || index > 0 ? <View style={styles.separator} /> : null}
-                  <View style={styles.inviteBlock}>
-                    <Text style={styles.inviteText}>
-                      Invite sent to {partnerLabel(connection)} · Pending
-                    </Text>
-                    <View style={styles.inviteActions}>
-                      {busyId === connection.id ? (
-                        <ActivityIndicator color="#007aff" />
-                      ) : (
+                  ))}
+                  {outgoing.map((connection, index) => (
+                    <View key={connection.id}>
+                      {incoming.length > 0 || index > 0 ? <View style={styles.separator} /> : null}
+                      <View style={styles.waitingRow}>
+                        <Text style={styles.waitingText} numberOfLines={1}>
+                          Waiting for {partnerLabel(connection)}
+                        </Text>
+                        {busyId === connection.id ? (
+                          <ActivityIndicator color="#007aff" />
+                        ) : (
+                          <Pressable
+                            onPress={() =>
+                              void runInviteAction(connection.id, () => cancelInvite(connection.id))
+                            }
+                            disabled={busyId != null}
+                            style={({ pressed }) => pressed && styles.pressed}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Cancel invite to ${partnerLabel(connection)}`}
+                          >
+                            <Text style={styles.accept}>Cancel</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                  {codeInvites.map((invite, index) => (
+                    <View key={invite.id}>
+                      {incoming.length > 0 || outgoing.length > 0 || index > 0 ? (
+                        <View style={styles.separator} />
+                      ) : null}
+                      <View style={styles.waitingRow}>
+                        <View style={styles.waitingCopy}>
+                          <Text style={styles.waitingText} numberOfLines={1}>
+                            Waiting for {invite.inviteeName || 'someone'}
+                          </Text>
+                          <Text style={styles.codeExpires}>Expires {expiresLabel(invite.expiresAt)}</Text>
+                        </View>
                         <Pressable
                           onPress={() =>
-                            void runInviteAction(connection.id, () => cancelInvite(connection.id))
+                            void sharePartnerInvite({
+                              name: invite.inviteeName ?? '',
+                              goalTitle: invite.goalTitle,
+                              code: invite.code,
+                            })
+                          }
+                          style={({ pressed }) => pressed && styles.pressed}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Share invite ${invite.code} again`}
+                        >
+                          <Text style={styles.accept}>Share again</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() =>
+                            Alert.alert('Cancel this invite?', 'This code will stop working.', [
+                              { text: 'Keep', style: 'cancel' },
+                              {
+                                text: 'Cancel',
+                                style: 'destructive',
+                                onPress: () =>
+                                  void runInviteAction(invite.id, async () => {
+                                    await cancelCodeInvite(invite.id);
+                                    await loadCodes();
+                                  }),
+                              },
+                            ])
                           }
                           disabled={busyId != null}
                           style={({ pressed }) => pressed && styles.pressed}
                           accessibilityRole="button"
-                          accessibilityLabel={`Cancel invite to ${partnerLabel(connection)}`}
+                          accessibilityLabel={`Cancel invite ${invite.code}`}
                         >
-                          <Text style={styles.accept}>Cancel</Text>
+                          <Text style={styles.decline}>Cancel</Text>
                         </Pressable>
-                      )}
+                      </View>
                     </View>
-                  </View>
+                  ))}
                 </View>
-              ))}
-            </View>
-          </>
-        ) : null}
+              </>
+            ) : null}
 
-        {partners.length > 0 ? (
-          <>
-            <Text style={styles.section}>Partners</Text>
             <View style={styles.card}>
-              {partners.map((connection, index) => (
-                <View key={connection.id}>
-                  {index > 0 ? <View style={styles.separator} /> : null}
-                  <Pressable
-                    onPress={() =>
-                      navigation.navigate('Partner', {
-                        connectionId: connection.id,
-                        name: partnerLabel(connection),
-                        partnerId: connection.partnerId,
-                      })
-                    }
-                    style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel={partnerLabel(connection)}
-                  >
-                    <Text style={styles.rowLabel} numberOfLines={1}>
-                      {partnerLabel(connection)}
-                    </Text>
-                    <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-                  </Pressable>
+              <Pressable
+                onPress={() => navigation.navigate('MayaHome')}
+                style={({ pressed }) => [styles.personRow, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Maya, Automated Advisor"
+              >
+                <View style={[styles.personAvatar, styles.mayaAvatar]}>
+                  <Text style={styles.mayaInitial}>M</Text>
                 </View>
-              ))}
+                <View style={styles.personBody}>
+                  <Text style={styles.personName}>Maya</Text>
+                  <Text style={styles.personRole}>Automated Advisor</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+              </Pressable>
             </View>
-          </>
-        ) : null}
 
-        {codeInvites.length > 0 ? (
-          <View style={styles.card}>
-            {codeInvites.map((invite, index) => (
-              <View key={invite.id}>
-                {index > 0 ? <View style={styles.separator} /> : null}
-                <View style={styles.inviteBlock}>
-                  <Text style={styles.inviteText}>
-                    Invite pending · {invite.inviteeName || 'No name'} · {invite.code}
-                  </Text>
-                  <Text style={styles.codeExpires}>Expires {expiresLabel(invite.expiresAt)}</Text>
-                  <View style={styles.inviteActions}>
-                    <Pressable
-                      onPress={() =>
-                        void sharePartnerInvite({
-                          name: invite.inviteeName ?? '',
-                          goalTitle: invite.goalTitle,
-                          code: invite.code,
-                        })
-                      }
-                      style={({ pressed }) => pressed && styles.pressed}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Share invite ${invite.code} again`}
-                    >
-                      <Text style={styles.accept}>Share again</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() =>
-                        Alert.alert('Cancel this invite?', 'This code will stop working.', [
-                          { text: 'Keep', style: 'cancel' },
-                          {
-                            text: 'Cancel',
-                            style: 'destructive',
-                            onPress: () =>
-                              void runInviteAction(invite.id, async () => {
-                                await cancelCodeInvite(invite.id);
-                                await loadCodes();
-                              }),
-                          },
-                        ])
-                      }
-                      disabled={busyId != null}
-                      style={({ pressed }) => pressed && styles.pressed}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Cancel invite ${invite.code}`}
-                    >
-                      <Text style={styles.decline}>Cancel</Text>
-                    </Pressable>
-                  </View>
+            {coaches.length > 0 ? (
+              <>
+                <Text style={styles.section}>Coaches</Text>
+                <View style={styles.card}>
+                  {coaches.map((connection, index) => (
+                    <View key={connection.id}>
+                      {index > 0 ? <View style={styles.separator} /> : null}
+                      {renderPerson(connection)}
+                    </View>
+                  ))}
                 </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
+              </>
+            ) : null}
 
-        {isEmpty && !loadError && codeInvites.length === 0 ? (
-          <Text style={styles.empty}>
-            Partners can see the goals you choose to share. Invite someone to get started.
-          </Text>
-        ) : null}
+            {partners.length > 0 ? (
+              <>
+                <Text style={styles.section}>Partners</Text>
+                <View style={styles.card}>
+                  {partners.map((connection, index) => (
+                    <View key={connection.id}>
+                      {index > 0 ? <View style={styles.separator} /> : null}
+                      {renderPerson(connection)}
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : null}
+
+            {coaches.length === 0 && partners.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>
+                  Invite someone to be your accountability partner
+                </Text>
+                <Pressable
+                  onPress={openCodeInvite}
+                  style={({ pressed }) => [styles.inviteButton, styles.emptyInvite, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Invite with a code"
+                >
+                  <Text style={styles.inviteButtonText}>Invite with a code</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </>
+        )}
+
+        <Text style={styles.section}>Get help</Text>
+        <View style={styles.card}>
+          <Pressable
+            onPress={() => {
+              setRequestHelp(null);
+              setRequestOpen(true);
+            }}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Talk to someone"
+          >
+            <View style={styles.actionText}>
+              <Text style={styles.rowLabel}>Talk to someone</Text>
+              {requestSentDay ? (
+                <Text style={styles.requestSent}>Request sent · {formatDate(requestSentDay)}</Text>
+              ) : null}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+          </Pressable>
+          <View style={styles.separator} />
+          <Pressable
+            onPress={() => {
+              setRequestHelp('setup');
+              setRequestOpen(true);
+            }}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Help setting goals"
+          >
+            <Text style={styles.rowLabel}>Help setting goals</Text>
+            <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+          </Pressable>
+        </View>
 
         {blocked.length > 0 ? (
           <Pressable
@@ -567,8 +674,6 @@ export default function CommunityScreen({ navigation, route }: Props) {
             <Ionicons name="chevron-forward" size={16} color="#c7c7cc" />
           </Pressable>
         ) : null}
-          </>
-        )}
 
         <Text style={[styles.section, styles.comingSection]}>What's coming?</Text>
         <WhatsComing />
@@ -581,6 +686,37 @@ export default function CommunityScreen({ navigation, route }: Props) {
           <Text style={styles.feedbackLinkText}>Send feedback</Text>
         </Pressable>
       </ScrollView>
+
+      <Modal
+        visible={inviteMenu}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setInviteMenu(false)}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={() => setInviteMenu(false)}>
+          <Pressable style={styles.sheet} onPress={() => undefined}>
+            <Pressable
+              onPress={openCodeInvite}
+              style={({ pressed }) => [styles.sheetButton, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Invite with a code"
+            >
+              <Text style={styles.sheetButtonText}>Invite with a code</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setInviteMenu(false);
+                setRedeemOpen(true);
+              }}
+              style={({ pressed }) => [styles.sheetButton, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Have an invite code?"
+            >
+              <Text style={styles.sheetButtonText}>Have an invite code?</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={inviteOpen}
@@ -864,6 +1000,131 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.55,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  headerInvite: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#007aff',
+  },
+  personRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  personAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e5e5ea',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mayaAvatar: {
+    backgroundColor: '#007aff',
+  },
+  personInitial: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#111',
+  },
+  mayaInitial: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  personBody: {
+    flex: 1,
+    gap: 2,
+  },
+  personName: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#111',
+  },
+  personRole: {
+    fontSize: 13,
+    color: '#6B6B70',
+  },
+  personPreview: {
+    fontSize: 15,
+    color: '#3a3a3c',
+  },
+  personMeta: {
+    alignItems: 'flex-end',
+    gap: 6,
+    minWidth: 28,
+  },
+  personTime: {
+    fontSize: 13,
+    color: '#8e8e93',
+  },
+  unreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#007AFF',
+  },
+  waitingRow: {
+    minHeight: 44,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  waitingCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  waitingText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#6B6B70',
+  },
+  emptyCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 24,
+    gap: 12,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    lineHeight: 22,
+    color: '#111',
+  },
+  emptyInvite: {
+    marginBottom: 0,
+  },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 28,
+  },
+  sheetButton: {
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  sheetButtonText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#007aff',
   },
   modalOverlay: {
     flex: 1,

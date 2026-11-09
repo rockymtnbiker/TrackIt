@@ -17,7 +17,7 @@ import {
 import { ScrollView } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { DatePickerModal } from '../components/DatePickerModal';
-import { CommentsEntry } from '../components/CommentsEntry';
+import { MessageAboutGoal } from '../components/MessageAboutGoal';
 import { BlockRowPress, DEFAULT_DRAGGABLE_ITEM_HEIGHT, DraggableItem } from '../components/DraggableItem';
 import { StatusLine } from '../components/StatusLine';
 import GoalDetailCards from '../components/GoalDetailCards';
@@ -108,6 +108,19 @@ const RING_CENTER = 28;
 const RING_RADIUS = 22.75;
 const RING_STROKE = 5.25;
 const SEGMENT_GAP = 5.25;
+
+function topGoal(goal: Goal, all: Goal[]): Goal {
+  const byId = new Map(all.map((item) => [item.id, item]));
+  let current = goal;
+  while (current.parentId) {
+    const parent = byId.get(current.parentId);
+    if (!parent) {
+      break;
+    }
+    current = parent;
+  }
+  return current;
+}
 
 function subtreeIds(rootId: string, nodes: Goal[]): string[] {
   const childrenMap = buildChildrenMap(nodes);
@@ -1346,15 +1359,7 @@ export default function GoalScreen({ navigation, route }: Props) {
 
         {!editing ? <GoalDetailCards goal={node} /> : null}
 
-        {!editing && node.parentId == null && ownerId ? (
-          <CommentsEntry
-            goalId={node.id}
-            goalTitle={node.title}
-            ownerId={ownerId}
-            readOnly={readOnly}
-            sharedByName={sharedByName}
-          />
-        ) : null}
+        {!editing ? <MessageAboutGoal goalId={topGoal(node, nodes).id} /> : null}
       </ScrollView>
 
       <ProgressSheet

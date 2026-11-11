@@ -1,6 +1,8 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import GoalSetupScreen from '../screens/GoalSetupScreen';
+import MayaFlowScreen from '../screens/MayaFlowScreen';
+import type { CommunityStackParamList } from './CommunityStackNavigator';
 import FirstGoalScreen from '../screens/onboarding/FirstGoalScreen';
 import HowItWorksScreen from '../screens/onboarding/HowItWorksScreen';
 import NameScreen from '../screens/onboarding/NameScreen';
@@ -13,9 +15,20 @@ export type OnboardingStackParamList = {
   Name: undefined;
   FirstGoal: undefined;
   GoalSetup: undefined;
+  Maya: undefined;
 };
 
 const Stack = createNativeStackNavigator<OnboardingStackParamList>();
+
+function OnboardingMaya(
+  props: NativeStackScreenProps<OnboardingStackParamList, 'Maya'>,
+) {
+  return (
+    <MayaFlowScreen
+      {...(props as NativeStackScreenProps<CommunityStackParamList, 'Maya'>)}
+    />
+  );
+}
 
 function OnboardingGoalSetup(
   props: NativeStackScreenProps<OnboardingStackParamList, 'GoalSetup'>,
@@ -46,6 +59,16 @@ export default function OnboardingStackNavigator() {
         name="GoalSetup"
         component={OnboardingGoalSetup}
         options={{ title: 'Step 1 of 3', headerBackTitle: 'Back' }}
+      />
+      <Stack.Screen
+        name="Maya"
+        component={OnboardingMaya}
+        options={{
+          presentation: 'fullScreenModal',
+          title: 'Maya',
+          headerTitleAlign: 'center',
+          headerBackVisible: false,
+        }}
       />
     </Stack.Navigator>
   );

@@ -1,7 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -16,8 +16,15 @@ import {
   FLOATING_ADD_BUTTON_CLEARANCE,
   FloatingAddButton,
 } from '../components/FloatingAddButton';
+import { GoalSetupChoiceSheet } from '../components/GoalSetupChoiceSheet';
 import { PageHeader } from '../components/PageHeader';
+import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
+import {
+  getGoalSetupChoice,
+  saveGoalSetupChoice,
+  type GoalSetupChoice,
+} from '../lib/goalSetupChoice';
 import {
   getAllGoals,
   getEntries,
@@ -83,6 +90,9 @@ function cardSubtitle(
 }
 
 export default function GoalsListScreen({ navigation }: Props) {
+  const { user } = useAuth();
+  const [choiceOpen, setChoiceOpen] = useState(false);
+  const [setupChoice, setSetupChoice] = useState<GoalSetupChoice | null>(null);
   const { settings } = useSettings();
   const [nodes, setNodes] = useState<Goal[]>([]);
   const [entries, setEntries] = useState<GoalEntry[]>([]);
@@ -129,7 +139,37 @@ export default function GoalsListScreen({ navigation }: Props) {
   const listRef = useRef(visibleNodes);
   listRef.current = visibleNodes;
 
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) {
+      return;
+    }
+    let cancelled = false;
+    void getGoalSetupChoice(userId).then((choice) => {
+      if (!cancelled) {
+        setSetupChoice(choice);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   const openCreate = () => {
+    setChoiceOpen(true);
+  };
+
+  const pickSetup = (choice: GoalSetupChoice) => {
+    const userId = user?.id;
+    if (userId) {
+      void saveGoalSetupChoice(userId, choice);
+    }
+    setSetupChoice(choice);
+    setChoiceOpen(false);
+    if (choice === 'maya') {
+      navigation.navigate('Maya');
+      return;
+    }
     navigation.navigate('GoalSetup');
   };
 
@@ -256,6 +296,13 @@ export default function GoalsListScreen({ navigation }: Props) {
         )}
       </ScrollView>
       <FloatingAddButton onPress={openCreate} />
+      <GoalSetupChoiceSheet
+        visible={choiceOpen}
+        selected={setupChoice}
+        onMaya={() => pickSetup('maya')}
+        onOwn={() => pickSetup('own')}
+        onCancel={() => setChoiceOpen(false)}
+      />
       </View>
     </View>
   );

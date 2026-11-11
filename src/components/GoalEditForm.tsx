@@ -113,6 +113,19 @@ function cappedToToday(value: string): string | null {
   return trimmed > today ? today : trimmed;
 }
 
+function dateOnly(value: string): string {
+  return value.trim().slice(0, 10);
+}
+
+/** Started cannot be after today, or after Actual end when that date is set. */
+function startedMaximum(actualEnd: string, today: string): string {
+  const end = dateOnly(actualEnd);
+  if (end && end < today) {
+    return end;
+  }
+  return today;
+}
+
 function parseAmount(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -443,7 +456,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
     if (next === 'done') {
       setDonePrompt({
         initialDate: draft.actualEndDate.trim() || today,
-        minimumDate: draft.actualStartDate.trim() || null,
+        minimumDate: draft.actualStartDate.trim().slice(0, 10) || null,
       });
       return;
     }
@@ -451,8 +464,13 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
   };
 
   const confirmDoneDate = (isoDate: string) => {
-    setDonePrompt(null);
+    const start = dateOnly(draft.actualStartDate);
     const date = cappedToToday(isoDate) ?? today;
+    if (start && date < start) {
+      Alert.alert("The end date can't be before Started.");
+      return;
+    }
+    setDonePrompt(null);
     patch({ status: 'done', actualEndDate: date });
   };
 
@@ -530,12 +548,15 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
               label={DETAIL_LABELS.started}
               labelWidth={118}
               value={draft.actualStartDate}
-              maximumDate={parseLocalDate(
-                draft.actualEndDate.trim() && draft.actualEndDate.trim() < today
-                  ? draft.actualEndDate.trim()
-                  : today,
-              )}
-              onChange={(actualStartDate) => patch({ actualStartDate })}
+              maximumDate={parseLocalDate(startedMaximum(draft.actualEndDate, today))}
+              onChange={(actualStartDate) => {
+                const end = dateOnly(draft.actualEndDate);
+                if (end && dateOnly(actualStartDate) > end) {
+                  Alert.alert("Started can't be after the end date.");
+                  return;
+                }
+                patch({ actualStartDate });
+              }}
             />
             {draft.status === 'done' ? (
               <FormDateRow
@@ -543,12 +564,20 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
                 labelWidth={118}
                 value={draft.actualEndDate}
                 minimumDate={
-                  draft.actualStartDate.trim()
-                    ? parseLocalDate(draft.actualStartDate.trim())
+                  dateOnly(draft.actualStartDate) &&
+                  dateOnly(draft.actualStartDate) <= today
+                    ? parseLocalDate(dateOnly(draft.actualStartDate))
                     : undefined
                 }
                 maximumDate={parseLocalDate(today)}
-                onChange={(actualEndDate) => patch({ actualEndDate })}
+                onChange={(actualEndDate) => {
+                  const start = dateOnly(draft.actualStartDate);
+                  if (start && dateOnly(actualEndDate) < start) {
+                    Alert.alert("The end date can't be before Started.");
+                    return;
+                  }
+                  patch({ actualEndDate });
+                }}
               />
             ) : (
               <FormFieldRow label={DETAIL_LABELS.actualEnd} labelWidth={118}>
@@ -830,7 +859,9 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
           title={DETAIL_LABELS.actualEnd}
           value={parseLocalDate(donePrompt.initialDate)}
           minimumDate={
-            donePrompt.minimumDate ? parseLocalDate(donePrompt.minimumDate) : undefined
+            donePrompt.minimumDate && donePrompt.minimumDate <= today
+              ? parseLocalDate(donePrompt.minimumDate)
+              : undefined
           }
           maximumDate={parseLocalDate(today)}
           onCancel={cancelDoneDate}

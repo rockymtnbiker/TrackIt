@@ -1,6 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import ChatScreen from '../screens/ChatScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
+import MayaFlowScreen from '../screens/MayaFlowScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalSetupScreen from '../screens/GoalSetupScreen';
 import GoalsListScreen from '../screens/GoalsListScreen';
@@ -33,19 +34,19 @@ export type ChatParams = {
 export type GoalsStackParamList = {
   GoalsList: undefined;
   GoalSetup: undefined;
+  Maya: undefined;
   Goal: GoalRouteParams;
   Chat: ChatParams;
   Profile: undefined;
   DeleteAccount: undefined;
-  StepDetail: { goalId: string };
 };
 
 export type TodayStackParamList = {
   TodayMain: { focusToday?: number; freshGoalId?: string } | undefined;
   GoalSetup: undefined;
+  Maya: undefined;
   Goal: GoalRouteParams;
   Chat: ChatParams;
-  StepDetail: { goalId: string };
 };
 
 const Stack = createNativeStackNavigator<GoalsStackParamList>();
@@ -62,6 +63,16 @@ export default function GoalsStackNavigator() {
         name="GoalSetup"
         component={GoalSetupScreen}
         options={{ title: 'Step 1 of 3', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="Maya"
+        component={MayaFlowScreen}
+        options={{
+          presentation: 'fullScreenModal',
+          title: 'Maya',
+          headerTitleAlign: 'center',
+          headerBackVisible: false,
+        }}
       />
       <Stack.Screen
         name="Goal"

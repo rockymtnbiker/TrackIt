@@ -27,6 +27,7 @@ import {
   FLOATING_ADD_BUTTON_SIZE,
   FloatingAddButton,
 } from '../components/FloatingAddButton';
+import { GoalSetupChoiceSheet } from '../components/GoalSetupChoiceSheet';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { DatePickerModal } from '../components/DatePickerModal';
 import { NEXT_STEP_MESSAGE, NextStepActions } from '../components/NextStepPrompt';
@@ -37,6 +38,11 @@ import { showActionSheet } from '../components/showActionSheet';
 import { AREA_ICONS } from '../constants/areaIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
+import {
+  getGoalSetupChoice,
+  saveGoalSetupChoice,
+  type GoalSetupChoice,
+} from '../lib/goalSetupChoice';
 import { useSettings } from '../context/SettingsContext';
 import {
   createGoal,
@@ -1395,6 +1401,8 @@ export default function TodayScreen() {
   const [mayaName, setMayaName] = useState('');
   const [mayaToast, setMayaToast] = useState<string | null>(null);
   const [mayaNudge, setMayaNudge] = useState<{ goalId: string; text: string } | null>(null);
+  const [choiceOpen, setChoiceOpen] = useState(false);
+  const [setupChoice, setSetupChoice] = useState<GoalSetupChoice | null>(null);
   const tipsLoadGen = useRef(0);
   const lotsToastIndex = useRef(0);
   const mayaPromptGen = useRef(0);
@@ -2069,12 +2077,18 @@ export default function TodayScreen() {
 
   const confirmGoalDone = (date: Date) => {
     const goal = nodes.find((node) => node.id === donePromptGoalId);
-    setDonePromptGoalId(null);
     if (!goal) {
+      setDonePromptGoalId(null);
       return;
     }
     const picked = toLocalDateString(date);
     const day = picked > today ? today : picked;
+    const start = goal.actualStartDate?.slice(0, 10) ?? '';
+    if (start && day < start) {
+      Alert.alert("The end date can't be before Started.");
+      return;
+    }
+    setDonePromptGoalId(null);
     const previous = nodes;
     setNodes((current) =>
       current.map((node) =>
@@ -2291,9 +2305,49 @@ export default function TodayScreen() {
     ? nodes.find((node) => node.id === logStepId) ?? null
     : null;
 
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) {
+      return;
+    }
+    let cancelled = false;
+    void getGoalSetupChoice(userId).then((choice) => {
+      if (!cancelled) {
+        setSetupChoice(choice);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   const openCreate = () => {
+    setChoiceOpen(true);
+  };
+
+  const pickSetup = (choice: GoalSetupChoice) => {
+    const userId = user?.id;
+    if (userId) {
+      void saveGoalSetupChoice(userId, choice);
+    }
+    setSetupChoice(choice);
+    setChoiceOpen(false);
+    if (choice === 'maya') {
+      navigation.navigate('Maya');
+      return;
+    }
     navigation.navigate('GoalSetup');
   };
+
+  const setupSheet = (
+    <GoalSetupChoiceSheet
+      visible={choiceOpen}
+      selected={setupChoice}
+      onMaya={() => pickSetup('maya')}
+      onOwn={() => pickSetup('own')}
+      onCancel={() => setChoiceOpen(false)}
+    />
+  );
 
   const mayaIdSet = useMemo(() => new Set(mayaGoalIds), [mayaGoalIds]);
   const mayaLine = useMemo(
@@ -2333,6 +2387,7 @@ export default function TodayScreen() {
           <ActivityIndicator color="#007aff" />
         </View>
         <FloatingAddButton onPress={openCreate} />
+        {setupSheet}
       </View>
     );
   }
@@ -2354,6 +2409,7 @@ export default function TodayScreen() {
           </Pressable>
         </View>
         <FloatingAddButton onPress={openCreate} />
+        {setupSheet}
       </View>
     );
   }
@@ -2703,6 +2759,7 @@ export default function TodayScreen() {
       )}
     </ScrollView>
       <FloatingAddButton onPress={openCreate} />
+      {setupSheet}
       {cardMode ? (
         <View style={styles.createdCard}>
           <View style={styles.createdCardHeader}>
@@ -2836,8 +2893,9 @@ export default function TodayScreen() {
           title="Actual end"
           value={parseLocalDate(today)}
           minimumDate={
-            donePromptGoal.actualStartDate && donePromptGoal.actualStartDate <= today
-              ? parseLocalDate(donePromptGoal.actualStartDate)
+            donePromptGoal.actualStartDate &&
+            donePromptGoal.actualStartDate.slice(0, 10) <= today
+              ? parseLocalDate(donePromptGoal.actualStartDate.slice(0, 10))
               : undefined
           }
           maximumDate={parseLocalDate(today)}

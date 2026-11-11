@@ -61,9 +61,10 @@ import {
   type ShapeDraft,
   type ShapeStepId,
 } from '../lib/mayaShape';
-import { ageRangeFromChoice, getAgeRange, getDisplayName, saveAgeRange } from '../lib/profileApi';
+import { ageRangeFromChoice, getAgeRange, getDisplayName, markOnboarded, saveAgeRange } from '../lib/profileApi';
 import type { MayaLevel } from '../lib/settingsApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
+import { finishOnboarding, finishOnboardingToCoach } from '../navigation/onboardingHandoff';
 import { formatDateMDY } from '../utils/date';
 
 type Props = NativeStackScreenProps<CommunityStackParamList, 'Maya'>;
@@ -116,6 +117,8 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const lock = useRef(false);
   const saveLock = useRef(false);
   const savedGoalId = useRef<string | null>(null);
+  const lastSavedId = useRef<string | null>(null);
+  const fromOnboarding = (navigation.getState().routeNames as string[]).includes('FirstGoal');
   const ageKnownRef = useRef(false);
   const askLevelRef = useRef(true);
   const levelAskedRef = useRef(false);
@@ -246,6 +249,15 @@ export default function MayaFlowScreen({ navigation }: Props) {
     if (saving) {
       return;
     }
+    if (fromOnboarding) {
+      const goalId = lastSavedId.current;
+      if (goalId) {
+        finishOnboarding(goalId);
+        return;
+      }
+      navigation.goBack();
+      return;
+    }
     if (closing) {
       openSavedGoal(false);
       return;
@@ -255,7 +267,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
       return;
     }
     navigation.goBack();
-  }, [closing, navigation, openSavedGoal, saving]);
+  }, [closing, fromOnboarding, navigation, openSavedGoal, saving]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -379,7 +391,11 @@ export default function MayaFlowScreen({ navigation }: Props) {
     void (async () => {
       try {
         const goalId = await saveShapedGoal(current.answers, draft);
+        if (fromOnboarding) {
+          await markOnboarded();
+        }
         savedGoalId.current = goalId;
+        lastSavedId.current = goalId;
         if (askLevelRef.current) {
           await updateSettings({ mayaLevel: draft.level });
         }
@@ -395,7 +411,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
         setSaving(false);
       }
     })();
-  }, [updateSettings, user?.id]);
+  }, [fromOnboarding, updateSettings, user?.id]);
 
   const saveAndFinish = useCallback(() => {
     if (saveLock.current || savedGoalId.current) {
@@ -416,7 +432,15 @@ export default function MayaFlowScreen({ navigation }: Props) {
         if (user?.id && stepCompleted(current, 'shape', 'helper')) {
           await saveMayaHelper(user.id, goalId, current.draft?.helper ?? null);
         }
+        if (fromOnboarding) {
+          await markOnboarded();
+        }
         savedGoalId.current = goalId;
+        lastSavedId.current = goalId;
+        if (fromOnboarding) {
+          finishOnboarding(goalId);
+          return;
+        }
         openSavedGoal(true);
       } catch (error) {
         Alert.alert('Could not save your goal', saveError(error));
@@ -425,7 +449,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
         setSaving(false);
       }
     })();
-  }, [openSavedGoal, updateSettings, user?.id]);
+  }, [fromOnboarding, openSavedGoal, updateSettings, user?.id]);
 
   const describe = useCallback(
     (step: StepRef): Described => {
@@ -572,10 +596,26 @@ export default function MayaFlowScreen({ navigation }: Props) {
             <View style={styles.choices}>
               <ChoiceButton
                 label={MAYA_CLOSING.talk}
-                onPress={() => navigation.popTo('CommunityMain', { openSupport: 'setup' })}
+                onPress={() => {
+                  if (fromOnboarding) {
+                    finishOnboardingToCoach();
+                    return;
+                  }
+                  navigation.popTo('CommunityMain', { openSupport: 'setup' });
+                }}
               />
               <ChoiceButton label={MAYA_CLOSING.another} onPress={writeAnother} />
-              <ChoiceButton label={MAYA_CLOSING.done} onPress={() => openSavedGoal(false)} />
+              <ChoiceButton
+                label={MAYA_CLOSING.done}
+                onPress={() => {
+                  const goalId = lastSavedId.current;
+                  if (fromOnboarding && goalId) {
+                    finishOnboarding(goalId);
+                    return;
+                  }
+                  openSavedGoal(false);
+                }}
+              />
             </View>
           </>
         ) : null}

@@ -6,6 +6,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CommunityProvider, useCommunity } from '../context/CommunityContext';
 import ChatScreen from '../screens/ChatScreen';
+import MayaFlowScreen from '../screens/MayaFlowScreen';
 import PartnerScreen from '../screens/PartnerScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import WeeklyReflectionScreen from '../screens/WeeklyReflectionScreen';
@@ -34,7 +35,6 @@ export type DashboardStackParamList = {
   Partner: { connectionId: string; name: string; partnerId: string | null };
   Goal: GoalRouteParams;
   Chat: ChatParams;
-  StepDetail: { goalId: string };
 };
 
 const Tab = createMaterialTopTabNavigator<RootTabParamList>();
@@ -54,6 +54,16 @@ function TodayStackNavigator() {
         name="GoalSetup"
         component={GoalSetupScreen}
         options={{ title: 'Step 1 of 3', headerTitleAlign: 'center' }}
+      />
+      <TodayStack.Screen
+        name="Maya"
+        component={MayaFlowScreen}
+        options={{
+          presentation: 'fullScreenModal',
+          title: 'Maya',
+          headerTitleAlign: 'center',
+          headerBackVisible: false,
+        }}
       />
       <TodayStack.Screen
         name="Goal"

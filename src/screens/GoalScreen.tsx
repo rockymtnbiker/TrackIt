@@ -86,7 +86,8 @@ import { pastDueStatus } from '../lib/statusMessages';
 import { STATUS_COLORS } from '../constants';
 import { REFLECTION_COPY } from '../constants/reflection';
 import { formatDate, formatShortDate, isPastDate } from '../utils/date';
-import { GoalReadout } from './StepDetailScreen';
+import { GoalReadout } from '../components/GoalReadout';
+import SixWeekSection from '../components/SixWeekSection';
 
 type Props = NativeStackScreenProps<GoalsStackParamList, 'Goal'>;
 
@@ -1332,6 +1333,10 @@ export default function GoalScreen({ navigation, route }: Props) {
             entries={entries}
             onSetTargetDate={readOnly ? undefined : () => openTargetDate(node)}
           />
+        ) : null}
+
+        {!editing ? (
+          <SixWeekSection node={node} nodes={nodes} entries={entries} />
         ) : null}
 
         {!editing && tree.length > 0 ? (

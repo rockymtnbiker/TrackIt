@@ -5,6 +5,7 @@ import MayaFlowScreen from '../screens/MayaFlowScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalSetupScreen from '../screens/GoalSetupScreen';
 import GoalsListScreen from '../screens/GoalsListScreen';
+import { HowItWorksReplayScreen } from '../screens/onboarding/HowItWorksScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 
 export type GoalRouteParams = {
@@ -39,6 +40,7 @@ export type GoalsStackParamList = {
   Chat: ChatParams;
   Profile: undefined;
   DeleteAccount: undefined;
+  HowItWorks: undefined;
 };
 
 export type TodayStackParamList = {
@@ -97,6 +99,11 @@ export default function GoalsStackNavigator() {
         name="DeleteAccount"
         component={DeleteAccountScreen}
         options={{ title: 'Delete account', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="HowItWorks"
+        component={HowItWorksReplayScreen}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );

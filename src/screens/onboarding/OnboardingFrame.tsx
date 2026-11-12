@@ -9,11 +9,15 @@ export function OnboardingFrame({
   keyboard,
   children,
   footer,
+  headerRight,
+  showProgress = true,
 }: {
   step: number;
   keyboard?: boolean;
   children: ReactNode;
   footer: ReactNode;
+  headerRight?: ReactNode;
+  showProgress?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const body = (
@@ -23,7 +27,10 @@ export function OnboardingFrame({
         { paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 12) },
       ]}
     >
-      <ProgressDots step={step} />
+      <View style={styles.topBar}>
+        {showProgress ? <ProgressDots step={step} /> : <View style={styles.topSpacer} />}
+        {headerRight ? <View style={styles.headerRight}>{headerRight}</View> : null}
+      </View>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -108,6 +115,18 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#f2f2f7',
+  },
+  topBar: {
+    minHeight: 20,
+  },
+  topSpacer: {
+    height: 20,
+  },
+  headerRight: {
+    position: 'absolute',
+    right: 16,
+    top: -6,
+    zIndex: 1,
   },
   dots: {
     flexDirection: 'row',

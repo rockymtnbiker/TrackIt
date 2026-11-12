@@ -41,7 +41,7 @@ import { formatTime } from '../utils/formatTime';
 type Props = {
   navigation: {
     navigate: (
-      screen: 'DeleteAccount' | 'Goal',
+      screen: 'DeleteAccount' | 'Goal' | 'HowItWorks',
       params?: { goalId: string; editReminder?: boolean },
     ) => void;
   };
@@ -554,6 +554,16 @@ export default function ProfileScreen({ navigation }: Props) {
 
       <Text style={styles.section}>Help</Text>
       <View style={styles.card}>
+        <Pressable
+          onPress={() => navigation.navigate('HowItWorks')}
+          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="How TrackIt works"
+        >
+          <Text style={styles.rowLabel}>How TrackIt works</Text>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+        </Pressable>
+        <View style={styles.separator} />
         <Pressable
           onPress={showTipsAgain}
           style={({ pressed }) => [styles.row, pressed && styles.pressed]}

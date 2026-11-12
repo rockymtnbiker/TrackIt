@@ -8,6 +8,7 @@ import LearnScreen from '../screens/LearnScreen';
 import PartnerScreen from '../screens/PartnerScreen';
 import MayaFlowScreen from '../screens/MayaFlowScreen';
 import MayaHomeScreen from '../screens/MayaHomeScreen';
+import { HowItWorksReplayScreen } from '../screens/onboarding/HowItWorksScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import type { ChatParams, GoalRouteParams } from './GoalsStackNavigator';
 
@@ -28,6 +29,7 @@ export type CommunityStackParamList = {
   Goal: GoalRouteParams;
   Profile: undefined;
   DeleteAccount: undefined;
+  HowItWorks: undefined;
 };
 
 const Stack = createNativeStackNavigator<CommunityStackParamList>();
@@ -85,6 +87,11 @@ export default function CommunityStackNavigator() {
         name="DeleteAccount"
         component={DeleteAccountScreen}
         options={{ title: 'Delete account', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="HowItWorks"
+        component={HowItWorksReplayScreen}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Chat"

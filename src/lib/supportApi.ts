@@ -5,7 +5,8 @@ export type ContactMethod = 'text' | 'email';
 
 export type SupportRequest = {
   id: string;
-  helpType: HelpType;
+  /** One choice, or several HelpType values joined with ", ". */
+  helpType: string;
   details: string | null;
   contactMethod: ContactMethod;
   contactValue: string;
@@ -15,7 +16,7 @@ export type SupportRequest = {
 
 type SupportRequestRow = {
   id: string;
-  help_type: HelpType;
+  help_type: string;
   details: string | null;
   contact_method: ContactMethod;
   contact_value: string;
@@ -70,7 +71,7 @@ export async function getLatestSupportRequest(): Promise<SupportRequest | null> 
 }
 
 export async function createSupportRequest(input: {
-  helpType: HelpType;
+  helpType: string;
   details: string | null;
   contactMethod: ContactMethod;
   contactValue: string;

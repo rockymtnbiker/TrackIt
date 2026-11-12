@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CONCEPTS } from '../constants/concepts';
+import { CONCEPTS, type Concept } from '../constants/concepts';
 import {
   getMyVotes,
   upsertVote,
@@ -40,7 +40,17 @@ function errorMessage(error: unknown): string {
   return 'Could not save that vote.';
 }
 
-export function WhatsComing() {
+export function WhatsComing({
+  concepts = CONCEPTS,
+  titles,
+  embedded = false,
+}: {
+  concepts?: readonly Concept[];
+  /** Display title by concept key. Votes still use the concept key. */
+  titles?: Readonly<Record<string, string>>;
+  /** Buttons and comment only, for a card the parent already draws. */
+  embedded?: boolean;
+}) {
   const [votes, setVotes] = useState<Record<string, MyVote>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -138,8 +148,62 @@ export function WhatsComing() {
       });
   };
 
+  const cards = concepts.map((concept) => {
+    const mine = votes[concept.key];
+    const title = titles?.[concept.key] ?? concept.title;
+    const votesAndNote = (
+      <>
+        <View style={embedded ? styles.embeddedButtons : styles.buttons}>
+          <VoteButton
+            label="I'd use this"
+            selected={mine?.vote === 'yes'}
+            disabled={savingKey === concept.key}
+            onPress={() => choose(concept.key, 'yes')}
+          />
+          <VoteButton
+            label="Not for me"
+            selected={mine?.vote === 'no'}
+            disabled={savingKey === concept.key}
+            onPress={() => choose(concept.key, 'no')}
+          />
+        </View>
+        {mine ? (
+          <Pressable
+            onPress={() => setNote({ key: concept.key, draft: mine.comment ?? '' })}
+            style={({ pressed }) => [
+              embedded ? styles.embeddedMore : styles.more,
+              pressed && styles.pressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={`Tell us more about ${title}`}
+          >
+            <Text style={styles.moreText}>Tell us more</Text>
+          </Pressable>
+        ) : null}
+      </>
+    );
+    if (embedded) {
+      return <View key={concept.key}>{votesAndNote}</View>;
+    }
+    return (
+      <View key={concept.key} style={styles.card}>
+        {concept.image ? (
+          <Image source={concept.image} style={styles.image} resizeMode="cover" />
+        ) : (
+          <View style={styles.image} accessibilityLabel="Image coming soon" />
+        )}
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.description}>{concept.description}</Text>
+        {votesAndNote}
+      </View>
+    );
+  });
+
   return (
     <View>
+      {embedded ? (
+        cards
+      ) : (
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -149,46 +213,10 @@ export function WhatsComing() {
         nestedScrollEnabled
         contentContainerStyle={styles.row}
       >
-        {CONCEPTS.map((concept) => {
-          const mine = votes[concept.key];
-          return (
-            <View key={concept.key} style={styles.card}>
-              {concept.image ? (
-                <Image source={concept.image} style={styles.image} resizeMode="cover" />
-              ) : (
-                <View style={styles.image} accessibilityLabel="Image coming soon" />
-              )}
-              <Text style={styles.title}>{concept.title}</Text>
-              <Text style={styles.description}>{concept.description}</Text>
-              <View style={styles.buttons}>
-                <VoteButton
-                  label="I'd use this"
-                  selected={mine?.vote === 'yes'}
-                  disabled={savingKey === concept.key}
-                  onPress={() => choose(concept.key, 'yes')}
-                />
-                <VoteButton
-                  label="Not for me"
-                  selected={mine?.vote === 'no'}
-                  disabled={savingKey === concept.key}
-                  onPress={() => choose(concept.key, 'no')}
-                />
-              </View>
-              {mine ? (
-                <Pressable
-                  onPress={() => setNote({ key: concept.key, draft: mine.comment ?? '' })}
-                  style={({ pressed }) => [styles.more, pressed && styles.pressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Tell us more about ${concept.title}`}
-                >
-                  <Text style={styles.moreText}>Tell us more</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          );
-        })}
+        {cards}
       </ScrollView>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      )}
+      {error ? <Text style={embedded ? styles.embeddedError : styles.error}>{error}</Text> : null}
       {note ? (
         <NoteSheet
           value={note.draft}
@@ -360,6 +388,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 8,
     marginHorizontal: 14,
+  },
+  embeddedButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  embeddedMore: {
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    justifyContent: 'center',
+    marginTop: -4,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  embeddedError: {
+    fontSize: 14,
+    color: '#c62828',
+    marginHorizontal: 16,
+    marginBottom: 12,
   },
   moreText: {
     fontSize: 15,

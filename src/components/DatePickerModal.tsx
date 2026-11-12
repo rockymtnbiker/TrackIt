@@ -44,7 +44,9 @@ export function DatePickerModal({
           <DateTimePicker
             value={draft}
             mode="date"
-            display="inline"
+            display="spinner"
+            themeVariant="light"
+            textColor="#111"
             minimumDate={minimumDate}
             maximumDate={maximumDate}
             onChange={(_event, date) => {
@@ -87,7 +89,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   picker: {
-    height: 340,
+    height: 216,
     alignSelf: 'stretch',
   },
   actions: {

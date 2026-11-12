@@ -1,4 +1,4 @@
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useState } from 'react';
@@ -16,15 +16,12 @@ import {
 } from 'react-native';
 import { FeedbackSheet } from '../components/FeedbackSheet';
 import { TimePickerModal } from '../components/TimePickerModal';
-import { BADGES } from '../constants/badges';
 import { MAYA_CHECKIN_OPTIONS, MAYA_DAILY } from '../constants/maya/daily';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { listEarnedBadges, type EarnedBadge } from '../lib/badges';
 import { clockFromDate, dateAtClock } from '../lib/clock';
 import { getAllGoals } from '../lib/goalTreeApi';
 import { WEEKDAY_NAMES } from '../lib/goalDetailText';
-import { localCalendarDay } from '../lib/localDate';
 import { calendarDayLabels } from '../lib/week';
 import { getDisplayName, saveDisplayName } from '../lib/profileApi';
 import { resetTips } from '../lib/tips';
@@ -35,13 +32,12 @@ import {
 } from '../lib/reminders';
 import type { MayaLevel, ReminderMode, WeekdayIndex, WeekStart } from '../lib/settingsApi';
 import type { Goal } from '../types/goal';
-import { formatDateMDY } from '../utils/date';
 import { formatTime } from '../utils/formatTime';
 
 type Props = {
   navigation: {
     navigate: (
-      screen: 'DeleteAccount' | 'Goal' | 'HowItWorks',
+      screen: 'DeleteAccount' | 'Goal' | 'HowItWorks' | 'Learn',
       params?: { goalId: string; editReminder?: boolean },
     ) => void;
   };
@@ -146,8 +142,6 @@ export default function ProfileScreen({ navigation }: Props) {
   const [editingName, setEditingName] = useState(false);
   const [checkinPicker, setCheckinPicker] = useState(false);
   const [reflectionPicker, setReflectionPicker] = useState(false);
-  const [earnedBadges, setEarnedBadges] = useState<EarnedBadge[]>([]);
-  const [badgesLoaded, setBadgesLoaded] = useState(false);
   const [reminderGoals, setReminderGoals] = useState<Goal[] | null>(null);
 
   useEffect(() => {
@@ -201,31 +195,6 @@ export default function ProfileScreen({ navigation }: Props) {
       };
     }, [settings.reminderMode]),
   );
-
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      void listEarnedBadges()
-        .then((rows) => {
-          if (!cancelled) {
-            setEarnedBadges(rows);
-          }
-        })
-        .catch((error) => {
-          console.warn('Failed to load badges', error);
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setBadgesLoaded(true);
-          }
-        });
-      return () => {
-        cancelled = true;
-      };
-    }, []),
-  );
-
-  const earnedByKey = new Map(earnedBadges.map((badge) => [badge.badgeKey, badge]));
 
   const persistDisplayName = async (value: string) => {
     const trimmed = value.trim();
@@ -372,40 +341,6 @@ export default function ProfileScreen({ navigation }: Props) {
             {user?.email ?? '—'}
           </Text>
         </View>
-      </View>
-
-      <Text style={styles.section}>Badges</Text>
-      <View style={styles.card}>
-        {badgesLoaded ? (
-          <View style={styles.badgeGrid}>
-            {BADGES.map((badge) => {
-              const earned = earnedByKey.get(badge.key);
-              const earnedDay = earned ? localCalendarDay(earned.earnedAt) : '';
-              const earnedLabel = earnedDay ? formatDateMDY(earnedDay) : '';
-              return (
-                <View
-                  key={badge.key}
-                  style={styles.badgeCell}
-                  accessibilityLabel={
-                    earned
-                      ? `${badge.name}, earned ${earnedLabel}`
-                      : `${badge.name}, ${badge.hint}`
-                  }
-                >
-                  <MaterialCommunityIcons
-                    name={badge.icon}
-                    size={32}
-                    color={earned ? '#007aff' : '#c7c7cc'}
-                  />
-                  <Text style={[styles.badgeName, !earned && styles.badgeMuted]}>{badge.name}</Text>
-                  <Text style={styles.badgeDetail}>{earned ? earnedLabel : badge.hint}</Text>
-                </View>
-              );
-            })}
-          </View>
-        ) : (
-          <ActivityIndicator color="#007aff" style={styles.badgeLoading} />
-        )}
       </View>
 
       <Text style={styles.section}>Subscription</Text>
@@ -555,12 +490,12 @@ export default function ProfileScreen({ navigation }: Props) {
       <Text style={styles.section}>Help</Text>
       <View style={styles.card}>
         <Pressable
-          onPress={() => navigation.navigate('HowItWorks')}
+          onPress={() => navigation.navigate('Learn')}
           style={({ pressed }) => [styles.row, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="How TrackIt works"
+          accessibilityLabel="Learn"
         >
-          <Text style={styles.rowLabel}>How TrackIt works</Text>
+          <Text style={styles.rowLabel}>Learn</Text>
           <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
         </Pressable>
         <View style={styles.separator} />
@@ -712,32 +647,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginBottom: 24,
     overflow: 'hidden',
-  },
-  badgeGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  badgeCell: {
-    width: '50%',
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    gap: 4,
-  },
-  badgeName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111',
-    textAlign: 'center',
-  },
-  badgeMuted: {
-    color: '#8e8e93',
-  },
-  badgeDetail: {
-    fontSize: 12,
-    lineHeight: 16,
-    color: '#8e8e93',
-    textAlign: 'center',
   },
   badgeLoading: {
     margin: 16,

@@ -13,7 +13,7 @@ export const REFLECTION_COPY = {
   busyStep: 'Pick one small step to focus on next week.',
   slipped: 'Set a reminder for this goal',
   setTime: 'Set a time',
-  dailyCheckin: "You're on one daily check-in. Change in Profile.",
+  dailyCheckin: "You're on one daily check-in. Change in Settings.",
   whyStarted: "Here's why you started:",
   addWhy: '+ Add your why',
   breakStep: 'Break the next step into something smaller',

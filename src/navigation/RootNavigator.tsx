@@ -125,7 +125,7 @@ function OnboardedApp() {
             name: 'Community',
             params: {
               screen: 'CommunityMain',
-              params: { openSupport: 'setup' },
+              params: { openSupport: 'talk' },
             },
           }),
         );

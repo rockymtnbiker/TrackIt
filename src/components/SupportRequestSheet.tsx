@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,7 +22,7 @@ import {
 import { KeyboardSafe } from './KeyboardSafe';
 
 const HELP_CHOICES: { value: HelpType; label: string }[] = [
-  { value: 'setup', label: 'Help setting up my goals' },
+  { value: 'setup', label: 'Help setting and reaching goals' },
   { value: 'checkins', label: 'Weekly check-ins to keep me on track' },
   { value: 'life', label: 'Talking through bigger life stuff' },
 ];
@@ -58,7 +59,9 @@ export function SupportRequestSheet({
 }) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [helpType, setHelpType] = useState<HelpType | null>(initialHelpType);
+  const [selected, setSelected] = useState<HelpType[]>(
+    initialHelpType ? [initialHelpType] : [],
+  );
   const [details, setDetails] = useState('');
   const [method, setMethod] = useState<ContactMethod>('email');
   const [emailValue, setEmailValue] = useState(user?.email ?? '');
@@ -67,7 +70,7 @@ export function SupportRequestSheet({
   const [error, setError] = useState<string | null>(null);
 
   const contact = method === 'email' ? emailValue : phoneValue;
-  const canSend = helpType != null && contact.trim().length > 0 && !saving;
+  const canSend = selected.length > 0 && contact.trim().length > 0 && !saving;
 
   const close = () => {
     if (saving) {
@@ -80,8 +83,8 @@ export function SupportRequestSheet({
     if (saving) {
       return;
     }
-    if (!helpType) {
-      setError('Pick what would help most.');
+    if (selected.length === 0) {
+      setError('Pick at least one.');
       return;
     }
     const contactValue = contact.trim();
@@ -96,6 +99,9 @@ export function SupportRequestSheet({
     setSaving(true);
     setError(null);
     const trimmedDetails = details.trim();
+    const helpType = HELP_CHOICES.filter((choice) => selected.includes(choice.value))
+      .map((choice) => choice.value)
+      .join(', ');
     void createSupportRequest({
       helpType,
       details: trimmedDetails ? trimmedDetails : null,
@@ -127,24 +133,32 @@ export function SupportRequestSheet({
             <Text style={styles.label}>What would help most?</Text>
             <View style={styles.choiceCard}>
               {HELP_CHOICES.map((choice, index) => {
-                const selected = helpType === choice.value;
+                const checked = selected.includes(choice.value);
                 return (
                   <View key={choice.value}>
                     {index > 0 ? <View style={styles.separator} /> : null}
                     <Pressable
-                      onPress={() => setHelpType(choice.value)}
+                      onPress={() =>
+                        setSelected((current) =>
+                          current.includes(choice.value)
+                            ? current.filter((value) => value !== choice.value)
+                            : [...current, choice.value],
+                        )
+                      }
                       disabled={saving}
                       style={({ pressed }) => [styles.choice, pressed && styles.pressed]}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked }}
                       accessibilityLabel={choice.label}
                     >
-                      <Text style={[styles.choiceLabel, selected && styles.choiceLabelSelected]}>
+                      <Text style={[styles.choiceLabel, checked && styles.choiceLabelSelected]}>
                         {choice.label}
                       </Text>
-                      <View style={[styles.radio, selected && styles.radioSelected]}>
-                        {selected ? <View style={styles.radioDot} /> : null}
-                      </View>
+                      <Ionicons
+                        name={checked ? 'checkbox' : 'square-outline'}
+                        size={22}
+                        color={checked ? '#007aff' : '#c7c7cc'}
+                      />
                     </Pressable>
                   </View>
                 );
@@ -289,24 +303,6 @@ const styles = StyleSheet.create({
   choiceLabelSelected: {
     color: '#007aff',
     fontWeight: '600',
-  },
-  radio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: '#c7c7cc',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioSelected: {
-    borderColor: '#007aff',
-  },
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#007aff',
   },
   separator: {
     height: StyleSheet.hairlineWidth,

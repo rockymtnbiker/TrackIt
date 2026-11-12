@@ -3,24 +3,28 @@ import BlockedScreen from '../screens/BlockedScreen';
 import ChatScreen from '../screens/ChatScreen';
 import CommunityScreen from '../screens/CommunityScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
-import GoalScreen from '../screens/GoalScreen';
+import LearnArticleScreen from '../screens/LearnArticleScreen';
 import LearnScreen from '../screens/LearnScreen';
+import GoalScreen from '../screens/GoalScreen';
+import GroupsInterestScreen from '../screens/GroupsInterestScreen';
 import PartnerScreen from '../screens/PartnerScreen';
 import MayaFlowScreen from '../screens/MayaFlowScreen';
 import MayaHomeScreen from '../screens/MayaHomeScreen';
 import { HowItWorksReplayScreen } from '../screens/onboarding/HowItWorksScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import type { LearnTab } from '../constants/learn';
 import type { ChatParams, GoalRouteParams } from './GoalsStackNavigator';
 
 export type CommunityStackParamList = {
   CommunityMain:
     | {
-        openSupport?: 'setup';
+        openSupport?: 'talk' | 'setup';
         openInvite?: boolean;
         openCodeInvite?: { goalId: string; goalTitle: string; title: string };
       }
     | undefined;
-  Learn: undefined;
+  Learn: { tab?: LearnTab } | undefined;
+  LearnArticle: { id: string };
   MayaHome: undefined;
   Maya: undefined;
   Partner: { connectionId: string; name: string; partnerId: string | null };
@@ -30,6 +34,7 @@ export type CommunityStackParamList = {
   Profile: undefined;
   DeleteAccount: undefined;
   HowItWorks: undefined;
+  GroupsInterest: undefined;
 };
 
 const Stack = createNativeStackNavigator<CommunityStackParamList>();
@@ -51,8 +56,25 @@ export default function CommunityStackNavigator() {
         component={LearnScreen}
         options={{
           title: 'Learn',
-          headerBackTitle: 'Connect',
           headerTitleAlign: 'center',
+        }}
+      />
+      <Stack.Screen
+        name="LearnArticle"
+        component={LearnArticleScreen}
+        options={{
+          title: 'Learn',
+          headerBackTitle: 'Learn',
+          headerTitleAlign: 'center',
+        }}
+      />
+      <Stack.Screen
+        name="GroupsInterest"
+        component={GroupsInterestScreen}
+        options={{
+          title: 'Groups',
+          headerTitleAlign: 'center',
+          headerBackTitle: 'Connect',
         }}
       />
       <Stack.Screen
@@ -78,7 +100,7 @@ export default function CommunityStackNavigator() {
         name="Profile"
         component={ProfileScreen}
         options={{
-          title: 'Profile',
+          title: 'Settings',
           headerTitleAlign: 'center',
           headerBackTitle: 'Connect',
         }}

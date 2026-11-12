@@ -16,8 +16,10 @@ import {
   FLOATING_ADD_BUTTON_CLEARANCE,
   FloatingAddButton,
 } from '../components/FloatingAddButton';
+import { DatePickerModal } from '../components/DatePickerModal';
 import { GoalSetupChoiceSheet } from '../components/GoalSetupChoiceSheet';
 import { PageHeader } from '../components/PageHeader';
+import { PlanDoneRangeSheet } from '../components/PlanDoneRangeSheet';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import {
@@ -38,8 +40,15 @@ import {
   rollupTotal,
   weeklyTarget,
 } from '../lib/goalTree';
-import { todayLocal } from '../lib/localDate';
-import { planSummaryLine } from '../lib/planSummary';
+import { parseLocalDate, todayLocal, toLocalDateString } from '../lib/localDate';
+import {
+  DEFAULT_PLAN_DONE_RANGE,
+  loadPlanDoneRange,
+  planSummaryText,
+  savePlanDoneRange,
+  type PlanDonePreset,
+  type PlanDoneRange,
+} from '../lib/planSummary';
 import type { WeekStart } from '../lib/settingsApi';
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { GoalEntry, Goal } from '../types/goal';
@@ -48,6 +57,19 @@ type Props = NativeStackScreenProps<GoalsStackParamList, 'GoalsList'>;
 
 /** Approximate goal card height (padding + title + meta + margin). */
 const LIST_CARD_HEIGHT = 72;
+
+function endOfLocalDay(day: string): Date {
+  const date = parseLocalDate(day);
+  date.setHours(23, 59, 59, 999);
+  return date;
+}
+
+function customEndValue(range: PlanDoneRange, start: string, today: string): string {
+  if (range.preset === 'custom' && range.end >= start && range.end <= today) {
+    return range.end;
+  }
+  return start;
+}
 
 function cardSubtitle(
   node: Goal,
@@ -99,6 +121,12 @@ export default function GoalsListScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [range, setRange] = useState<PlanDoneRange>(DEFAULT_PLAN_DONE_RANGE);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [picker, setPicker] = useState<'start' | 'end' | null>(null);
+  const [draftStart, setDraftStart] = useState<string | null>(null);
+  const customTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rangeTouched = useRef(false);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -126,8 +154,8 @@ export default function GoalsListScreen({ navigation }: Props) {
   const today = todayLocal();
   const childrenMap = useMemo(() => buildChildrenMap(nodes), [nodes]);
   const summary = useMemo(
-    () => planSummaryLine(nodes, settings.weekStart, today),
-    [nodes, settings.weekStart, today],
+    () => planSummaryText(nodes, range, settings.weekStart, today),
+    [nodes, range, settings.weekStart, today],
   );
   const visibleNodes = useMemo(
     () =>
@@ -145,15 +173,56 @@ export default function GoalsListScreen({ navigation }: Props) {
       return;
     }
     let cancelled = false;
+    rangeTouched.current = false;
     void getGoalSetupChoice(userId).then((choice) => {
       if (!cancelled) {
         setSetupChoice(choice);
+      }
+    });
+    void loadPlanDoneRange(userId).then((saved) => {
+      if (!cancelled && !rangeTouched.current) {
+        setRange(saved);
       }
     });
     return () => {
       cancelled = true;
     };
   }, [user?.id]);
+
+  useEffect(
+    () => () => {
+      if (customTimer.current) {
+        clearTimeout(customTimer.current);
+      }
+    },
+    [],
+  );
+
+  const applyRange = (next: PlanDoneRange) => {
+    rangeTouched.current = true;
+    setRange(next);
+    const userId = user?.id;
+    if (userId) {
+      void savePlanDoneRange(userId, next);
+    }
+  };
+
+  const openCustom = () => {
+    setRangeOpen(false);
+    if (customTimer.current) {
+      clearTimeout(customTimer.current);
+    }
+    customTimer.current = setTimeout(() => setPicker('start'), 280);
+  };
+
+  const chooseRange = (preset: PlanDonePreset) => {
+    if (preset === 'custom') {
+      openCustom();
+      return;
+    }
+    applyRange({ preset });
+    setRangeOpen(false);
+  };
 
   const openCreate = () => {
     setChoiceOpen(true);
@@ -202,8 +271,19 @@ export default function GoalsListScreen({ navigation }: Props) {
       <PageHeader
         title="Plan"
         subtitle="Your goals and the steps to get there"
+        help={() => navigation.navigate('Learn', { tab: 'plan' })}
       />
-      {summary ? <Text style={styles.summary}>{summary}</Text> : null}
+      {loading && nodes.length === 0 ? null : (
+        <Pressable
+          onPress={() => setRangeOpen(true)}
+          style={({ pressed }) => [styles.summary, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={summary}
+        >
+          <Text style={styles.summaryText}>{summary}</Text>
+          <Ionicons name="chevron-down" size={14} color="#666" />
+        </Pressable>
+      )}
       <View style={styles.listHost}>
       <ScrollView
         contentContainerStyle={styles.content}
@@ -303,6 +383,49 @@ export default function GoalsListScreen({ navigation }: Props) {
         onOwn={() => pickSetup('own')}
         onCancel={() => setChoiceOpen(false)}
       />
+      <PlanDoneRangeSheet
+        visible={rangeOpen}
+        selected={range.preset}
+        onSelect={chooseRange}
+        onClose={() => setRangeOpen(false)}
+      />
+      {picker === 'start' ? (
+        <DatePickerModal
+          title="Start"
+          value={parseLocalDate(range.preset === 'custom' ? range.start : today)}
+          maximumDate={endOfLocalDay(today)}
+          onCancel={() => setPicker(null)}
+          onConfirm={(date) => {
+            const start = toLocalDateString(date);
+            if (start > today) {
+              return;
+            }
+            setDraftStart(start);
+            setPicker(null);
+            if (customTimer.current) {
+              clearTimeout(customTimer.current);
+            }
+            customTimer.current = setTimeout(() => setPicker('end'), 280);
+          }}
+        />
+      ) : null}
+      {picker === 'end' && draftStart ? (
+        <DatePickerModal
+          title="End"
+          value={parseLocalDate(customEndValue(range, draftStart, today))}
+          minimumDate={parseLocalDate(draftStart)}
+          maximumDate={endOfLocalDay(today)}
+          onCancel={() => setPicker(null)}
+          onConfirm={(date) => {
+            const end = toLocalDateString(date);
+            if (end < draftStart || end > today) {
+              return;
+            }
+            applyRange({ preset: 'custom', start: draftStart, end });
+            setPicker(null);
+          }}
+        />
+      ) : null}
       </View>
     </View>
   );
@@ -317,11 +440,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   summary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 16,
     paddingBottom: 10,
-    fontSize: 15,
-    lineHeight: 20,
-    color: '#3a3a3c',
+  },
+  summaryText: {
+    flexShrink: 1,
+    fontSize: 13,
+    color: '#666',
+    minHeight: 16,
   },
   content: {
     padding: 12,

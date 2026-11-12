@@ -9,6 +9,9 @@ import ChatScreen from '../screens/ChatScreen';
 import MayaFlowScreen from '../screens/MayaFlowScreen';
 import PartnerScreen from '../screens/PartnerScreen';
 import DashboardScreen from '../screens/DashboardScreen';
+import LearnArticleScreen from '../screens/LearnArticleScreen';
+import LearnScreen from '../screens/LearnScreen';
+import { HowItWorksReplayScreen } from '../screens/onboarding/HowItWorksScreen';
 import WeeklyReflectionScreen from '../screens/WeeklyReflectionScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalSetupScreen from '../screens/GoalSetupScreen';
@@ -35,6 +38,9 @@ export type DashboardStackParamList = {
   Partner: { connectionId: string; name: string; partnerId: string | null };
   Goal: GoalRouteParams;
   Chat: ChatParams;
+  Learn: { tab?: 'plan' | 'do' | 'reflect' | 'connect' } | undefined;
+  LearnArticle: { id: string };
+  HowItWorks: undefined;
 };
 
 const Tab = createMaterialTopTabNavigator<RootTabParamList>();
@@ -74,6 +80,21 @@ function TodayStackNavigator() {
         name="Chat"
         component={ChatScreen}
         options={{ headerTitleAlign: 'center' }}
+      />
+      <TodayStack.Screen
+        name="Learn"
+        component={LearnScreen}
+        options={{ title: 'Learn', headerTitleAlign: 'center' }}
+      />
+      <TodayStack.Screen
+        name="LearnArticle"
+        component={LearnArticleScreen}
+        options={{ title: 'Learn', headerBackTitle: 'Learn', headerTitleAlign: 'center' }}
+      />
+      <TodayStack.Screen
+        name="HowItWorks"
+        component={HowItWorksReplayScreen}
+        options={{ headerShown: false }}
       />
     </TodayStack.Navigator>
   );
@@ -118,6 +139,21 @@ function DashboardStackNavigator() {
           title: route.params.name,
           headerTitleAlign: 'center',
         })}
+      />
+      <DashboardStack.Screen
+        name="Learn"
+        component={LearnScreen}
+        options={{ title: 'Learn', headerTitleAlign: 'center' }}
+      />
+      <DashboardStack.Screen
+        name="LearnArticle"
+        component={LearnArticleScreen}
+        options={{ title: 'Learn', headerBackTitle: 'Learn', headerTitleAlign: 'center' }}
+      />
+      <DashboardStack.Screen
+        name="HowItWorks"
+        component={HowItWorksReplayScreen}
+        options={{ headerShown: false }}
       />
     </DashboardStack.Navigator>
   );

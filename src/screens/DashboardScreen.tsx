@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { BadgeGrid } from '../components/BadgeGrid';
 import { PageHeader } from '../components/PageHeader';
 import { useFocusEffect, type NavigationProp } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -985,7 +986,11 @@ export default function DashboardScreen({ navigation }: Props) {
   if (loading && nodes.length === 0) {
     return (
       <View style={styles.safeArea}>
-        <PageHeader title="Reflect" subtitle="Look back on your week and plan the next" />
+        <PageHeader
+          title="Reflect"
+          subtitle="Look back on your week and plan the next"
+          help={() => navigation.navigate('Learn', { tab: 'reflect' })}
+        />
         <View style={styles.loadingState}>
           <ActivityIndicator color="#007aff" />
         </View>
@@ -996,7 +1001,11 @@ export default function DashboardScreen({ navigation }: Props) {
   if (loadError && nodes.length === 0) {
     return (
       <View style={styles.safeArea}>
-        <PageHeader title="Reflect" subtitle="Look back on your week and plan the next" />
+        <PageHeader
+          title="Reflect"
+          subtitle="Look back on your week and plan the next"
+          help={() => navigation.navigate('Learn', { tab: 'reflect' })}
+        />
         <View style={styles.loadingState}>
           <Text style={styles.errorText}>{loadError}</Text>
           <Pressable
@@ -1012,7 +1021,11 @@ export default function DashboardScreen({ navigation }: Props) {
 
   return (
     <View style={styles.safeArea}>
-      <PageHeader title="Reflect" subtitle="Look back on your week and plan the next" />
+      <PageHeader
+        title="Reflect"
+        subtitle="Look back on your week and plan the next"
+        help={() => navigation.navigate('Learn', { tab: 'reflect' })}
+      />
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
@@ -1270,6 +1283,7 @@ export default function DashboardScreen({ navigation }: Props) {
                 )}
               </View>
             ) : null}
+            <BadgeGrid />
             <Pressable
               onPress={() =>
                 navigation.getParent<NavigationProp<RootTabParamList>>()?.navigate('Goals')
@@ -1278,7 +1292,7 @@ export default function DashboardScreen({ navigation }: Props) {
               accessibilityRole="button"
               accessibilityLabel="Plan next week"
             >
-              <Text style={styles.planButtonText}>Plan next week →</Text>
+              <Text style={styles.planButtonText}>Plan next week</Text>
             </Pressable>
       </ScrollView>
     </View>

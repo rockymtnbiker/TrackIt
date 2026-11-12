@@ -601,7 +601,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
                     finishOnboardingToCoach();
                     return;
                   }
-                  navigation.popTo('CommunityMain', { openSupport: 'setup' });
+                  navigation.popTo('CommunityMain', { openSupport: 'talk' });
                 }}
               />
               <ChoiceButton label={MAYA_CLOSING.another} onPress={writeAnother} />

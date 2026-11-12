@@ -5,7 +5,10 @@ import MayaFlowScreen from '../screens/MayaFlowScreen';
 import GoalScreen from '../screens/GoalScreen';
 import GoalSetupScreen from '../screens/GoalSetupScreen';
 import GoalsListScreen from '../screens/GoalsListScreen';
+import LearnArticleScreen from '../screens/LearnArticleScreen';
+import LearnScreen from '../screens/LearnScreen';
 import { HowItWorksReplayScreen } from '../screens/onboarding/HowItWorksScreen';
+import type { LearnTab } from '../constants/learn';
 import ProfileScreen from '../screens/ProfileScreen';
 
 export type GoalRouteParams = {
@@ -41,6 +44,8 @@ export type GoalsStackParamList = {
   Profile: undefined;
   DeleteAccount: undefined;
   HowItWorks: undefined;
+  Learn: { tab?: LearnTab } | undefined;
+  LearnArticle: { id: string };
 };
 
 export type TodayStackParamList = {
@@ -49,6 +54,9 @@ export type TodayStackParamList = {
   Maya: undefined;
   Goal: GoalRouteParams;
   Chat: ChatParams;
+  Learn: { tab?: LearnTab } | undefined;
+  LearnArticle: { id: string };
+  HowItWorks: undefined;
 };
 
 const Stack = createNativeStackNavigator<GoalsStackParamList>();
@@ -90,7 +98,7 @@ export default function GoalsStackNavigator() {
         name="Profile"
         component={ProfileScreen}
         options={{
-          title: 'Profile',
+          title: 'Settings',
           headerTitleAlign: 'center',
           headerBackTitle: 'Plan',
         }}
@@ -104,6 +112,16 @@ export default function GoalsStackNavigator() {
         name="HowItWorks"
         component={HowItWorksReplayScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Learn"
+        component={LearnScreen}
+        options={{ title: 'Learn', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="LearnArticle"
+        component={LearnArticleScreen}
+        options={{ title: 'Learn', headerBackTitle: 'Learn', headerTitleAlign: 'center' }}
       />
     </Stack.Navigator>
   );

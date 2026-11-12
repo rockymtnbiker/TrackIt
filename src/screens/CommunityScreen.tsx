@@ -20,6 +20,7 @@ import { InviteCodeSheet, RedeemInviteSheet } from '../components/InviteCodeShee
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { SupportRequestSheet } from '../components/SupportRequestSheet';
 import { WhatsComing } from '../components/WhatsComing';
+import { CONCEPTS } from '../constants/concepts';
 import { useAuth } from '../context/AuthContext';
 import { useCommunity } from '../context/CommunityContext';
 import {
@@ -34,9 +35,8 @@ import {
   sharePartnerInvite,
   type PartnerInvite,
 } from '../lib/invitesApi';
-import { localCalendarDay } from '../lib/localDate';
 import type { ConnectionSummary } from '../lib/messagesApi';
-import { getLatestSupportRequest, type HelpType, type SupportRequest } from '../lib/supportApi';
+import type { HelpType } from '../lib/supportApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
 import type { Connection } from '../types/community';
 import { formatDate } from '../utils/date';
@@ -179,7 +179,6 @@ export default function CommunityScreen({ navigation, route }: Props) {
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestHelp, setRequestHelp] = useState<HelpType | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [latestRequest, setLatestRequest] = useState<SupportRequest | null>(null);
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -189,10 +188,11 @@ export default function CommunityScreen({ navigation, route }: Props) {
   const [inviteMenu, setInviteMenu] = useState(false);
 
   useEffect(() => {
-    if (route.params?.openSupport !== 'setup') {
+    const support = route.params?.openSupport;
+    if (support !== 'talk' && support !== 'setup') {
       return;
     }
-    setRequestHelp('setup');
+    setRequestHelp(support === 'setup' ? 'setup' : null);
     setRequestOpen(true);
     navigation.setParams({ openSupport: undefined });
   }, [navigation, route.params?.openSupport]);
@@ -253,20 +253,11 @@ export default function CommunityScreen({ navigation, route }: Props) {
     }
   }, []);
 
-  const loadLatestRequest = useCallback(async () => {
-    try {
-      setLatestRequest(await getLatestSupportRequest());
-    } catch {
-      // Partners still load if this read fails.
-    }
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
       void load();
       void loadCodes();
-      void loadLatestRequest();
-    }, [load, loadCodes, loadLatestRequest]),
+    }, [load, loadCodes]),
   );
 
   const visible = connections.filter((connection) => !hiddenFromMe(connection));
@@ -290,6 +281,9 @@ export default function CommunityScreen({ navigation, route }: Props) {
     .filter((connection) => blockedByMe(connection))
     .sort((a, b) => partnerLabel(a).localeCompare(partnerLabel(b)));
   const hasRequests = incoming.length > 0 || outgoing.length > 0 || codeInvites.length > 0;
+  const comingConcepts = CONCEPTS.filter(
+    (concept) => concept.key !== 'teams' && concept.key !== 'find_coach',
+  );
 
   const runInviteAction = async (id: string, action: () => Promise<unknown>) => {
     if (busyId) {
@@ -335,10 +329,6 @@ export default function CommunityScreen({ navigation, route }: Props) {
       setSending(false);
     }
   };
-
-  const requestSentDay = latestRequest
-    ? localCalendarDay(latestRequest.createdAt)
-    : '';
 
   const openCodeInvite = () => {
     setInviteMenu(false);
@@ -392,27 +382,17 @@ export default function CommunityScreen({ navigation, route }: Props) {
       <PageHeader
         title="Connect"
         subtitle="The people helping you reach your goals"
+        help={() => navigation.navigate('Learn', { tab: 'connect' })}
         right={
-          <View style={styles.headerActions}>
-            <Pressable
-              onPress={() => navigation.navigate('Profile')}
-              accessibilityRole="button"
-              accessibilityLabel="Profile"
-              hitSlop={8}
-              style={({ pressed }) => pressed && styles.pressed}
-            >
-              <Ionicons name="person-circle" size={28} color="#111" />
-            </Pressable>
-            <Pressable
-              onPress={() => setInviteMenu(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Invite"
-              hitSlop={8}
-              style={({ pressed }) => pressed && styles.pressed}
-            >
-              <Text style={styles.headerInvite}>+ Invite</Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => navigation.navigate('Profile')}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            hitSlop={8}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <Ionicons name="settings-outline" size={26} color="#111" />
+          </Pressable>
         }
       />
       <ScrollView
@@ -425,7 +405,6 @@ export default function CommunityScreen({ navigation, route }: Props) {
               setRefreshing(true);
               void load();
               void loadCodes();
-              void loadLatestRequest();
             }}
             tintColor="#007aff"
           />
@@ -583,85 +562,60 @@ export default function CommunityScreen({ navigation, route }: Props) {
               </Pressable>
             </View>
 
-            {coaches.length > 0 ? (
-              <>
-                <Text style={styles.section}>Coaches</Text>
-                <View style={styles.card}>
-                  {coaches.map((connection, index) => (
-                    <View key={connection.id}>
-                      {index > 0 ? <View style={styles.separator} /> : null}
-                      {renderPerson(connection)}
-                    </View>
-                  ))}
-                </View>
-              </>
-            ) : null}
-
-            {partners.length > 0 ? (
-              <>
-                <Text style={styles.section}>Partners</Text>
-                <View style={styles.card}>
-                  {partners.map((connection, index) => (
-                    <View key={connection.id}>
-                      {index > 0 ? <View style={styles.separator} /> : null}
-                      {renderPerson(connection)}
-                    </View>
-                  ))}
-                </View>
-              </>
-            ) : null}
-
-            {coaches.length === 0 && partners.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyTitle}>
-                  Invite someone to be your accountability partner
-                </Text>
+            <Text style={styles.section}>Achievement Coach</Text>
+            <View style={styles.card}>
+              {coaches.length > 0 ? (
+                coaches.map((connection, index) => (
+                  <View key={connection.id}>
+                    {index > 0 ? <View style={styles.separator} /> : null}
+                    {renderPerson(connection)}
+                  </View>
+                ))
+              ) : (
                 <Pressable
-                  onPress={openCodeInvite}
-                  style={({ pressed }) => [styles.inviteButton, styles.emptyInvite, pressed && styles.pressed]}
+                  onPress={() => {
+                    setRequestHelp(null);
+                    setRequestOpen(true);
+                  }}
+                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                   accessibilityRole="button"
-                  accessibilityLabel="Invite with a code"
+                  accessibilityLabel="Talk with an Achievement Coach"
                 >
-                  <Text style={styles.inviteButtonText}>Invite with a code</Text>
+                  <View style={styles.actionText}>
+                    <Text style={styles.rowLabel}>Talk with an Achievement Coach</Text>
+                    <Text style={styles.actionBody}>Talk with a real person about your goals</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
                 </Pressable>
-              </View>
-            ) : null}
+              )}
+            </View>
+
+            <Text style={styles.section}>Accountability Partners</Text>
+            <View style={styles.card}>
+              {partners.map((connection, index) => (
+                <View key={connection.id}>
+                  {index > 0 ? <View style={styles.separator} /> : null}
+                  {renderPerson(connection)}
+                </View>
+              ))}
+              {partners.length === 0 ? (
+                <Text style={styles.partnerEmpty}>
+                  Invite a friend to keep each other on track.
+                </Text>
+              ) : (
+                <View style={styles.separator} />
+              )}
+              <Pressable
+                onPress={() => setInviteMenu(true)}
+                style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Invite a partner"
+              >
+                <Text style={styles.inviteButtonText}>+ Invite a partner</Text>
+              </Pressable>
+            </View>
           </>
         )}
-
-        <Text style={styles.section}>Get help</Text>
-        <View style={styles.card}>
-          <Pressable
-            onPress={() => {
-              setRequestHelp(null);
-              setRequestOpen(true);
-            }}
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Talk to someone"
-          >
-            <View style={styles.actionText}>
-              <Text style={styles.rowLabel}>Talk to someone</Text>
-              {requestSentDay ? (
-                <Text style={styles.requestSent}>Request sent · {formatDate(requestSentDay)}</Text>
-              ) : null}
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-          </Pressable>
-          <View style={styles.separator} />
-          <Pressable
-            onPress={() => {
-              setRequestHelp('setup');
-              setRequestOpen(true);
-            }}
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Help setting goals"
-          >
-            <Text style={styles.rowLabel}>Help setting goals</Text>
-            <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
-          </Pressable>
-        </View>
 
         {blocked.length > 0 ? (
           <Pressable
@@ -675,8 +629,26 @@ export default function CommunityScreen({ navigation, route }: Props) {
           </Pressable>
         ) : null}
 
+        <Text style={styles.section}>Groups</Text>
+        <View style={styles.card}>
+          <Pressable
+            onPress={() => navigation.navigate('GroupsInterest')}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Create a group"
+          >
+            <View style={styles.actionText}>
+              <Text style={styles.rowLabel}>Create a group</Text>
+              <Text style={styles.actionBody}>
+                A team, friend group, or family where you can share group goals and individual goals in one place.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+          </Pressable>
+        </View>
+
         <Text style={[styles.section, styles.comingSection]}>What's coming?</Text>
-        <WhatsComing />
+        <WhatsComing concepts={comingConcepts} />
         <Pressable
           onPress={() => setFeedbackOpen(true)}
           style={({ pressed }) => [styles.feedbackLink, pressed && styles.pressed]}
@@ -789,8 +761,7 @@ export default function CommunityScreen({ navigation, route }: Props) {
             setRequestOpen(false);
             setRequestHelp(null);
           }}
-          onSent={(request) => {
-            setLatestRequest(request);
+          onSent={() => {
             setRequestOpen(false);
             setRequestHelp(null);
           }}
@@ -856,11 +827,6 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: '#6B6B70',
   },
-  requestSent: {
-    fontSize: 13,
-    color: '#6B6B70',
-    marginTop: 2,
-  },
   inviteRow: {
     flexDirection: 'row',
     gap: 8,
@@ -912,6 +878,14 @@ const styles = StyleSheet.create({
   },
   comingSection: {
     marginTop: 8,
+  },
+  partnerEmpty: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: '#6B6B70',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 2,
   },
   feedbackLink: {
     marginTop: 16,
@@ -1001,16 +975,6 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.55,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  headerInvite: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#007aff',
-  },
   personRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1087,22 +1051,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: '#6B6B70',
-  },
-  emptyCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 24,
-    gap: 12,
-  },
-  emptyTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    lineHeight: 22,
-    color: '#111',
-  },
-  emptyInvite: {
-    marginBottom: 0,
   },
   sheetBackdrop: {
     flex: 1,

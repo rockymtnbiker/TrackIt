@@ -802,7 +802,7 @@ const GoalEditForm = forwardRef<GoalEditFormHandle, Props>(function GoalEditForm
           }
         >
           {reminderLocked ? (
-            <Text style={styles.hint}>You're on one daily check-in. Change in Profile.</Text>
+            <Text style={styles.hint}>You're on one daily check-in. Change in Settings.</Text>
           ) : null}
         </DetailCard>
         </View>

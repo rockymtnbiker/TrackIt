@@ -2382,7 +2382,11 @@ export default function TodayScreen() {
   if (loading && nodes.length === 0) {
     return (
       <View style={styles.container}>
-        <PageHeader title="Do" subtitle="Tap a circle to log your progress" />
+        <PageHeader
+          title="Do"
+          subtitle="Tap a circle to log your progress"
+          help={() => navigation.navigate('Learn', { tab: 'do' })}
+        />
         <View style={styles.loadingState}>
           <ActivityIndicator color="#007aff" />
         </View>
@@ -2395,7 +2399,11 @@ export default function TodayScreen() {
   if (loadError && nodes.length === 0) {
     return (
       <View style={styles.container}>
-        <PageHeader title="Do" subtitle="Tap a circle to log your progress" />
+        <PageHeader
+          title="Do"
+          subtitle="Tap a circle to log your progress"
+          help={() => navigation.navigate('Learn', { tab: 'do' })}
+        />
         <View style={styles.loadingState}>
           <Text style={styles.errorText}>{loadError}</Text>
           <Pressable
@@ -2419,7 +2427,11 @@ export default function TodayScreen() {
       style={styles.container}
       onStartShouldSetResponderCapture={clearHighlightOnTouch}
     >
-    <PageHeader title="Do" subtitle="Tap a circle to log your progress" />
+    <PageHeader
+      title="Do"
+      subtitle="Tap a circle to log your progress"
+      help={() => navigation.navigate('Learn', { tab: 'do' })}
+    />
     {mayaLine ? (
       <MayaDailyCard
         text={mayaLine.text}

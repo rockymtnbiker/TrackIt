@@ -1,87 +1,74 @@
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SupportRequestSheet } from '../components/SupportRequestSheet';
-import { LEARN_VIDEOS, QUICK_READS } from '../constants/learn';
-import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { LEARN_ITEMS, type LearnItem, type LearnTab } from '../constants/learn';
 
-type Props = NativeStackScreenProps<CommunityStackParamList, 'Learn'>;
+type Props = {
+  navigation: {
+    navigate(screen: 'LearnArticle', params: { id: string }): void;
+    navigate(screen: 'HowItWorks'): void;
+  };
+  route: { params?: { tab?: LearnTab } };
+};
 
-export default function LearnScreen(_props: Props) {
-  const [requestOpen, setRequestOpen] = useState(false);
+function openItem(
+  navigation: Props['navigation'],
+  item: LearnItem,
+) {
+  if (item.kind === 'howItWorks') {
+    navigation.navigate('HowItWorks');
+    return;
+  }
+  navigation.navigate('LearnArticle', { id: item.id });
+}
+
+export default function LearnScreen({ navigation, route }: Props) {
+  const tab = route.params?.tab;
+  const sections = tab
+    ? [
+        {
+          title: 'For this page',
+          items: LEARN_ITEMS.filter((item) => item.tabs.includes(tab)),
+        },
+        {
+          title: 'Everything else',
+          items: LEARN_ITEMS.filter((item) => !item.tabs.includes(tab)),
+        },
+      ]
+    : [{ title: 'All topics', items: LEARN_ITEMS }];
 
   return (
     <View style={styles.screen}>
       <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-        <Pressable
-          onPress={() => setRequestOpen(true)}
-          style={({ pressed }) => [styles.talkLink, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Talk to someone"
-        >
-          <Text style={styles.talkText}>Talk to someone</Text>
-        </Pressable>
-
-        <Text style={styles.section}>Videos</Text>
-        {LEARN_VIDEOS.map((video) => {
-          const comingSoon = !video.url;
-          const body = (
-            <>
-              <Text style={styles.cardTitle}>{video.title}</Text>
-              {comingSoon ? <Text style={styles.comingSoon}>Coming soon</Text> : null}
-            </>
-          );
-          if (!video.url) {
-            return (
-              <View
-                key={video.id}
-                style={styles.card}
-                accessibilityLabel={`${video.title}, coming soon`}
-              >
-                {body}
+        <Text style={styles.placeholder}>Placeholder: more topics and videos are coming.</Text>
+        {sections.map((section) =>
+          section.items.length === 0 ? null : (
+            <View key={section.title}>
+              <Text style={styles.section}>{section.title}</Text>
+              <View style={styles.card}>
+                {section.items.map((item, index) => (
+                  <View key={item.id}>
+                    {index > 0 ? <View style={styles.separator} /> : null}
+                    <Pressable
+                      onPress={() => openItem(navigation, item)}
+                      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${item.title}. ${item.summary}`}
+                    >
+                      <View style={styles.rowText}>
+                        <Text style={styles.title}>{item.title}</Text>
+                        <Text style={styles.summary} numberOfLines={1}>
+                          {item.summary}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+                    </Pressable>
+                  </View>
+                ))}
               </View>
-            );
-          }
-          const url = video.url;
-          return (
-            <Pressable
-              key={video.id}
-              onPress={() => {
-                void Linking.openURL(url);
-              }}
-              style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={video.title}
-            >
-              {body}
-            </Pressable>
-          );
-        })}
-
-        <Text style={[styles.section, styles.sectionFollow]}>Quick reads</Text>
-        {QUICK_READS.map((tip) => (
-          <View key={tip.title} style={styles.readCard}>
-            <Text style={styles.readTitle}>{tip.title}</Text>
-            <Text style={styles.readBody}>{tip.body}</Text>
-          </View>
-        ))}
-
-        <Pressable
-          onPress={() => setRequestOpen(true)}
-          style={({ pressed }) => [styles.talkLink, styles.talkLinkBottom, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Talk to someone"
-        >
-          <Text style={styles.talkText}>Talk to someone</Text>
-        </Pressable>
+            </View>
+          ),
+        )}
       </ScrollView>
-
-      {requestOpen ? (
-        <SupportRequestSheet
-          onClose={() => setRequestOpen(false)}
-          onSent={() => setRequestOpen(false)}
-        />
-      ) : null}
     </View>
   );
 }
@@ -95,20 +82,11 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
-  talkLink: {
-    alignSelf: 'flex-start',
-    minHeight: 44,
-    justifyContent: 'center',
+  placeholder: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#8e8e93',
     marginBottom: 16,
-  },
-  talkLinkBottom: {
-    marginTop: 4,
-    marginBottom: 0,
-  },
-  talkText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#007aff',
   },
   section: {
     fontSize: 13,
@@ -118,45 +96,37 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginLeft: 4,
   },
-  sectionFollow: {
-    marginTop: 8,
-  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
+    marginBottom: 24,
+    overflow: 'hidden',
+  },
+  row: {
+    minHeight: 60,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: 12,
   },
-  cardTitle: {
+  rowText: {
     flex: 1,
+    gap: 2,
+  },
+  title: {
     fontSize: 17,
-    fontWeight: '700',
     color: '#111',
   },
-  comingSoon: {
-    fontSize: 13,
+  summary: {
+    fontSize: 15,
+    lineHeight: 20,
     color: '#8e8e93',
   },
-  readCard: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-    gap: 6,
-  },
-  readTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111',
-  },
-  readBody: {
-    fontSize: 15,
-    lineHeight: 21,
-    color: '#6B6B70',
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#e5e5ea',
+    marginLeft: 16,
   },
   pressed: {
     opacity: 0.55,

@@ -1,15 +1,9 @@
-import { CommonActions } from '@react-navigation/native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { getMyProfile } from '../lib/profileApi';
 import { openDoToday } from '../lib/reminders';
-import {
-  setOnboardingFinishedHandler,
-  takeCoachSupport,
-  takeFreshGoalId,
-} from './onboardingHandoff';
-import { navigationRef } from './navigationRef';
+import { setOnboardingFinishedHandler, takeFreshGoalId } from './onboardingHandoff';
 import AuthStackNavigator from './AuthStackNavigator';
 import OnboardingStackNavigator from './OnboardingStackNavigator';
 import TabNavigator from './TabNavigator';
@@ -115,20 +109,8 @@ function OnboardedApp() {
         return;
       }
       const goalId = takeFreshGoalId();
-      const coach = takeCoachSupport();
       if (goalId) {
         openDoToday(goalId);
-      }
-      if (coach && navigationRef.isReady()) {
-        navigationRef.dispatch(
-          CommonActions.navigate({
-            name: 'Community',
-            params: {
-              screen: 'CommunityMain',
-              params: { openSupport: 'talk' },
-            },
-          }),
-        );
       }
     });
     return () => {

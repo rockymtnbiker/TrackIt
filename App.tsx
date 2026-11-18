@@ -6,6 +6,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { BadgeCelebrationHost, BadgeStartup } from './src/components/BadgeCelebration';
 import { ReminderSync } from './src/components/ReminderSync';
 import { AuthProvider } from './src/context/AuthContext';
+import { CoachRequestProvider } from './src/context/CoachRequestContext';
 import { SettingsProvider } from './src/context/SettingsContext';
 import { navigationRef } from './src/navigation/navigationRef';
 import RootNavigator from './src/navigation/RootNavigator';
@@ -16,13 +17,15 @@ export default function App() {
       <SafeAreaProvider>
         <AuthProvider>
           <SettingsProvider>
-            <NavigationContainer ref={navigationRef}>
-              <RootNavigator />
-              <ReminderSync />
-              <BadgeStartup />
-              <BadgeCelebrationHost />
-              <StatusBar style="auto" />
-            </NavigationContainer>
+            <CoachRequestProvider>
+              <NavigationContainer ref={navigationRef}>
+                <RootNavigator />
+                <ReminderSync />
+                <BadgeStartup />
+                <BadgeCelebrationHost />
+                <StatusBar style="auto" />
+              </NavigationContainer>
+            </CoachRequestProvider>
           </SettingsProvider>
         </AuthProvider>
         <DevBadge />

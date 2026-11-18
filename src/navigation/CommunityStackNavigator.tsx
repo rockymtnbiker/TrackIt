@@ -18,7 +18,6 @@ import type { ChatParams, GoalRouteParams } from './GoalsStackNavigator';
 export type CommunityStackParamList = {
   CommunityMain:
     | {
-        openSupport?: 'talk' | 'setup';
         openInvite?: boolean;
         openCodeInvite?: { goalId: string; goalTitle: string; title: string };
       }

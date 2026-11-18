@@ -18,10 +18,10 @@ import { PageHeader } from '../components/PageHeader';
 import { FeedbackSheet } from '../components/FeedbackSheet';
 import { InviteCodeSheet, RedeemInviteSheet } from '../components/InviteCodeSheet';
 import { KeyboardSafe } from '../components/KeyboardSafe';
-import { SupportRequestSheet } from '../components/SupportRequestSheet';
 import { WhatsComing } from '../components/WhatsComing';
 import { CONCEPTS } from '../constants/concepts';
 import { useAuth } from '../context/AuthContext';
+import { useCoachRequest } from '../context/CoachRequestContext';
 import { useCommunity } from '../context/CommunityContext';
 import {
   cancelInvite,
@@ -36,7 +36,6 @@ import {
   type PartnerInvite,
 } from '../lib/invitesApi';
 import type { ConnectionSummary } from '../lib/messagesApi';
-import type { HelpType } from '../lib/supportApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
 import type { Connection } from '../types/community';
 import { formatDate } from '../utils/date';
@@ -169,6 +168,7 @@ function roleLabel(role: Connection['role']): string {
 
 export default function CommunityScreen({ navigation, route }: Props) {
   const { user } = useAuth();
+  const { openCoachRequest } = useCoachRequest();
   const { refreshConnections, summaries } = useCommunity();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -176,8 +176,6 @@ export default function CommunityScreen({ navigation, route }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [requestOpen, setRequestOpen] = useState(false);
-  const [requestHelp, setRequestHelp] = useState<HelpType | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -186,16 +184,6 @@ export default function CommunityScreen({ navigation, route }: Props) {
   const [codeSheet, setCodeSheet] = useState<CodeSheetRequest | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
   const [inviteMenu, setInviteMenu] = useState(false);
-
-  useEffect(() => {
-    const support = route.params?.openSupport;
-    if (support !== 'talk' && support !== 'setup') {
-      return;
-    }
-    setRequestHelp(support === 'setup' ? 'setup' : null);
-    setRequestOpen(true);
-    navigation.setParams({ openSupport: undefined });
-  }, [navigation, route.params?.openSupport]);
 
   useEffect(() => {
     if (route.params?.openInvite !== true) {
@@ -573,10 +561,7 @@ export default function CommunityScreen({ navigation, route }: Props) {
                 ))
               ) : (
                 <Pressable
-                  onPress={() => {
-                    setRequestHelp(null);
-                    setRequestOpen(true);
-                  }}
+                  onPress={() => openCoachRequest()}
                   style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                   accessibilityRole="button"
                   accessibilityLabel="Talk with an Achievement Coach"
@@ -754,19 +739,6 @@ export default function CommunityScreen({ navigation, route }: Props) {
         </KeyboardSafe>
       </Modal>
 
-      {requestOpen ? (
-        <SupportRequestSheet
-          initialHelpType={requestHelp}
-          onClose={() => {
-            setRequestOpen(false);
-            setRequestHelp(null);
-          }}
-          onSent={() => {
-            setRequestOpen(false);
-            setRequestHelp(null);
-          }}
-        />
-      ) : null}
       {feedbackOpen ? <FeedbackSheet onClose={() => setFeedbackOpen(false)} /> : null}
       {codeSheet ? (
         <InviteCodeSheet

@@ -317,8 +317,6 @@ export const JOB_CLOSING = {
     "If you'd like more help along the way, an Achievement Coach is a real person who works with you one-on-one. They can help you break down your next steps, work through anything that gets in the way, and keep your momentum going. Want to talk with one?",
   talk: 'Talk with an Achievement Coach',
   another: "Let's write another goal",
-  done: "I'm good for now",
   sent: 'Got it. A coach will reach out soon.',
-  good: 'Sounds good. You can reach an Achievement Coach anytime from Connect.',
   close: 'Close chat',
 } as const;

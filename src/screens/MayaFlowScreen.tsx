@@ -31,6 +31,7 @@ import { MAYA_DISCOVER, type MayaNode } from '../constants/maya/discover';
 import { HELPER_OPTIONS, LEVEL_OPTIONS, SHAPE_COPY } from '../constants/maya/shape';
 import { WEEKDAY_NAMES } from '../lib/goalDetailText';
 import { KeyboardAnswer, KeyboardChatScope, useKeyboardChatScroll, useKeyboardPoke } from '../lib/keyboardScroll';
+import { MayaScrollJump, MayaTurnScope, useMayaBubbleAnchor, useMayaTurnScroll } from '../lib/mayaTurnScroll';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import {
@@ -152,11 +153,12 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const [sheet, setSheet] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
-  const [jobNote, setJobNote] = useState<'sent' | 'good' | null>(null);
+  const [jobNote, setJobNote] = useState<'sent' | null>(null);
   const [archive, setArchive] = useState<Frozen[]>([]);
   const [goalNumber, setGoalNumber] = useState(1);
-  const followEnd = useRef(true);
-  const chatScroll = useKeyboardChatScroll(scrollRef, contentRef, () => followEnd.current);
+  const turnKey = `${goalNumber}-${walk.cursor}-${closing ? 'closing' : 'open'}`;
+  const turn = useMayaTurnScroll(scrollRef, contentRef, turnKey);
+  const chatScroll = useKeyboardChatScroll(scrollRef, contentRef, () => turn.followEnd.current);
 
   useEffect(() => {
     lock.current = false;
@@ -214,11 +216,13 @@ export default function MayaFlowScreen({ navigation }: Props) {
     return () => clearTimeout(timer);
   }, [revealed, visibleEnd]);
 
+  const placeRef = useRef(turn.place);
+  placeRef.current = turn.place;
   useEffect(() => {
-    if (!inviteOpen && followEnd.current) {
-      scrollRef.current?.scrollToEnd({ animated: false });
+    if (!inviteOpen) {
+      placeRef.current();
     }
-  }, [inviteOpen, shown, archive.length, closing]);
+  }, [inviteOpen]);
 
   const walkOptions = useCallback((): WalkOptions => {
     return {
@@ -714,6 +718,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
   return (
     <KeyboardChatScope scope={chatScroll.scope}>
     <KeyboardSafe behavior="padding" style={styles.screen}>
+      <MayaTurnScope api={turn.bubbleApi}>
       <View style={styles.scroll}>
       <ScrollView
         ref={scrollRef}
@@ -721,11 +726,17 @@ export default function MayaFlowScreen({ navigation }: Props) {
         contentContainerStyle={chatScroll.inset > 0 ? { paddingBottom: chatScroll.inset } : undefined}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
-        onLayout={chatScroll.onLayout}
-        onContentSizeChange={() => {
-          if (followEnd.current) {
-            scrollRef.current?.scrollToEnd({ animated: false });
-          }
+        scrollEventThrottle={16}
+        onScroll={turn.onScroll}
+        onScrollBeginDrag={turn.onScrollBeginDrag}
+        onScrollEndDrag={turn.onScrollEndDrag}
+        onMomentumScrollEnd={turn.onMomentumScrollEnd}
+        onLayout={(event) => {
+          turn.onViewport(event.nativeEvent.layout.height);
+          chatScroll.onLayout();
+        }}
+        onContentSizeChange={(_width, height) => {
+          turn.onContentSize(height);
           chatScroll.onContentSizeChange();
         }}
       >
@@ -827,28 +838,25 @@ export default function MayaFlowScreen({ navigation }: Props) {
           <>
             <MayaBubble text={walk.job ? JOB_CLOSING.coach : MAYA_CLOSING.coach} />
             {jobNote === 'sent' ? <MayaBubble text={JOB_CLOSING.sent} /> : null}
-            {jobNote === 'good' ? <MayaBubble text={JOB_CLOSING.good} /> : null}
             <View style={styles.choices}>
               <ChoiceButton
                 label={walk.job ? JOB_CLOSING.talk : MAYA_CLOSING.talk}
                 onPress={() => setCoachOpen(true)}
               />
               <ChoiceButton label={walk.job ? JOB_CLOSING.another : MAYA_CLOSING.another} onPress={writeAnother} />
-              <ChoiceButton
-                label={walk.job ? JOB_CLOSING.done : MAYA_CLOSING.done}
-                onPress={() => {
-                  if (walk.job) {
-                    setJobNote('good');
-                    return;
-                  }
-                  const goalId = lastSavedId.current;
-                  if (fromOnboarding && goalId) {
-                    finishOnboarding(goalId);
-                    return;
-                  }
-                  openSavedGoal(false);
-                }}
-              />
+              {walk.job ? null : (
+                <ChoiceButton
+                  label={MAYA_CLOSING.done}
+                  onPress={() => {
+                    const goalId = lastSavedId.current;
+                    if (fromOnboarding && goalId) {
+                      finishOnboarding(goalId);
+                      return;
+                    }
+                    openSavedGoal(false);
+                  }}
+                />
+              )}
               <ChoiceButton
                 label={JOB_CLOSING.close}
                 onPress={() => {
@@ -868,7 +876,9 @@ export default function MayaFlowScreen({ navigation }: Props) {
         {typing ? <TypingDots /> : null}
         </View>
       </ScrollView>
+      <MayaScrollJump visible={turn.showJump} onPress={turn.jump} />
       </View>
+      </MayaTurnScope>
       <Modal
         visible={sheet}
         transparent
@@ -1349,9 +1359,20 @@ function ChoiceButton({
   );
 }
 
-function MayaBubble({ text, note }: { text: string; note?: string }) {
+function MayaBubble({ text, note, track = true }: { text: string; note?: string; track?: boolean }) {
+  const anchor = useMayaBubbleAnchor();
+  const ref = useRef<ViewInstance>(null);
   return (
-    <View style={styles.bubbleRow}>
+    <View
+      ref={ref}
+      style={styles.bubbleRow}
+      collapsable={false}
+      onLayout={() => {
+        if (track) {
+          anchor(ref.current);
+        }
+      }}
+    >
       <View style={styles.avatar}>
         <Text style={styles.avatarText}>M</Text>
       </View>
@@ -1398,7 +1419,7 @@ function FrozenView({ item }: { item: Frozen }) {
     );
   }
   if (item.kind === 'maya') {
-    return <MayaBubble text={item.text} note={item.note} />;
+    return <MayaBubble text={item.text} note={item.note} track={false} />;
   }
   if (item.kind === 'card') {
     return (

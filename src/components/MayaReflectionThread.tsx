@@ -18,6 +18,7 @@ import {
 } from '../constants/maya/reflection';
 import { REFLECTION_ANSWERS, REFLECTION_COPY, type ReflectionAnswerId } from '../constants/reflection';
 import { KeyboardChatScope, useKeyboardChatScroll } from '../lib/keyboardScroll';
+import { MayaScrollJump, MayaTurnScope, useMayaBubbleAnchor, useMayaTurnScroll } from '../lib/mayaTurnScroll';
 import { getDisplayName } from '../lib/profileApi';
 import type { ReflectionDraft, ReflectionSection } from '../lib/reflectionDraft';
 import { answerLabel, personName } from '../lib/reflectionFlow';
@@ -109,14 +110,24 @@ export function MayaReflectionThread(props: {
   const scrollRef = useRef<ScrollViewInstance>(null);
   const contentRef = useRef<ViewInstance>(null);
   const anchors = useRef<Partial<Record<ReflectionTrailId, number>>>({});
-  const followEnd = useRef(true);
-  // Thread sits below the scroll content's 16px top padding.
-  const chatScroll = useKeyboardChatScroll(scrollRef, contentRef, () => followEnd.current, 16);
+  const turnKey = [
+    props.section,
+    props.adjustIndex,
+    props.adjustPhase,
+    props.connectStep,
+    props.answers.length,
+    props.partnerCheckin ?? '',
+    props.coachCheckin ?? '',
+  ].join('|');
+  const turn = useMayaTurnScroll(scrollRef, contentRef, turnKey, { origin: 16 });
+  const followEnd = turn.followEnd;
   const scrollY = useRef(0);
   const viewportH = useRef(0);
   const prevEditing = useRef<ReflectionEdit | null>(null);
   const [name, setName] = useState('');
   const [replyAnchor, setReplyAnchor] = useState<string | null>(null);
+  // Thread sits below the scroll content's 16px top padding.
+  const chatScroll = useKeyboardChatScroll(scrollRef, contentRef, () => followEnd.current, 16);
   if (props.editing != null || prevEditing.current != null) {
     followEnd.current = false;
   }
@@ -174,8 +185,6 @@ export function MayaReflectionThread(props: {
       setReplyAnchor(revised.kind === 'goal' ? `goal:${revised.goalId}` : revised.kind);
       return;
     }
-    followEnd.current = true;
-    scrollRef.current?.scrollTo({ y: 100000, animated: true });
   }, [
     props.editing,
     props.section,
@@ -192,6 +201,7 @@ export function MayaReflectionThread(props: {
       return;
     }
     followEnd.current = false;
+    turn.hold();
     const id = props.scrollTarget.id;
     const timer = setTimeout(() => {
       const y = anchors.current[id];
@@ -224,6 +234,8 @@ export function MayaReflectionThread(props: {
 
   return (
     <KeyboardChatScope scope={chatScroll.scope}>
+    <MayaTurnScope api={turn.bubbleApi}>
+    <View style={styles.scroll}>
     <ScrollView
       ref={scrollRef}
       style={styles.scroll}
@@ -233,15 +245,18 @@ export function MayaReflectionThread(props: {
       scrollEventThrottle={16}
       onScroll={(event) => {
         scrollY.current = event.nativeEvent.contentOffset.y;
+        turn.onScroll(event);
       }}
+      onScrollBeginDrag={turn.onScrollBeginDrag}
+      onScrollEndDrag={turn.onScrollEndDrag}
+      onMomentumScrollEnd={turn.onMomentumScrollEnd}
       onLayout={(event) => {
         viewportH.current = event.nativeEvent.layout.height;
+        turn.onViewport(event.nativeEvent.layout.height);
         chatScroll.onLayout();
       }}
-      onContentSizeChange={() => {
-        if (followEnd.current) {
-          scrollRef.current?.scrollTo({ y: 100000, animated: true });
-        }
+      onContentSizeChange={(_width, height) => {
+        turn.onContentSize(height);
         chatScroll.onContentSizeChange();
       }}
     >
@@ -604,6 +619,9 @@ export function MayaReflectionThread(props: {
       ) : null}
       </View>
     </ScrollView>
+    <MayaScrollJump visible={turn.showJump} onPress={turn.jump} />
+    </View>
+    </MayaTurnScope>
     </KeyboardChatScope>
   );
 }
@@ -669,8 +687,15 @@ function Reveal({
 }
 
 function MayaBubble({ text }: { text: string }) {
+  const anchor = useMayaBubbleAnchor();
+  const ref = useRef<ViewInstance>(null);
   return (
-    <View style={styles.bubbleRow}>
+    <View
+      ref={ref}
+      style={styles.bubbleRow}
+      collapsable={false}
+      onLayout={() => anchor(ref.current)}
+    >
       <View style={styles.avatar}>
         <Text style={styles.avatarText}>M</Text>
       </View>

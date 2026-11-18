@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAnswer, useKeyboardPoke } from '../lib/keyboardScroll';
 import { DatePickerModal } from './DatePickerModal';
 import { formFieldStyles } from './FormFields';
 import { SHAPE_COPY } from '../constants/maya/shape';
@@ -24,11 +26,14 @@ export function MayaCoachCard({
   draft,
   onDraft,
   onNext,
+  beforeNext,
 }: {
   draft: ShapeDraft;
   onDraft: (next: ShapeDraft) => void;
   onNext: () => void;
+  beforeNext?: ReactNode;
 }) {
+  const poke = useKeyboardPoke();
   const [editingId, setEditingId] = useState<string | null>(() => {
     const hasSuggestion = draft.steps.some((step) => step.text.trim().length > 0);
     if (hasSuggestion) {
@@ -37,7 +42,7 @@ export function MayaCoachCard({
     return draft.steps.find((step) => step.text.trim().length === 0)?.id ?? null;
   });
   return (
-    <View style={styles.stack}>
+    <KeyboardAnswer mode="focus" style={styles.stack}>
       <View style={styles.choices}>
         {draft.steps.map((step) => {
           const editing = editingId === step.id;
@@ -76,6 +81,8 @@ export function MayaCoachCard({
                   multiline
                   maxLength={240}
                   autoFocus
+                  onFocus={poke}
+                  onContentSizeChange={poke}
                   placeholder="Your step"
                   placeholderTextColor="#8e8e93"
                   style={[styles.stepInput, !step.checked && styles.stepInputOff]}
@@ -119,6 +126,7 @@ export function MayaCoachCard({
           <Text style={styles.choiceText}>{SHAPE_COPY.addStep}</Text>
         </Pressable>
       </View>
+      {beforeNext}
       <Pressable
         onPress={onNext}
         style={({ pressed }) => [styles.choice, pressed && styles.pressed]}
@@ -127,7 +135,7 @@ export function MayaCoachCard({
       >
         <Text style={styles.choiceText}>Next</Text>
       </Pressable>
-    </View>
+    </KeyboardAnswer>
   );
 }
 
@@ -150,11 +158,13 @@ export function MayaPlanCard({
   const why = whyText(answers);
   const steps = keptStepTitles(draft);
   const ready = draft.title.trim().length > 0;
+  const poke = useKeyboardPoke();
   return (
-    <View style={styles.stack}>
+    <KeyboardAnswer mode="focus" style={styles.stack}>
       <View style={styles.summary}>
         <TextInput
           value={draft.title}
+          onFocus={poke}
           onChangeText={(title) => onDraft({ ...draft, title })}
           placeholder="Your goal"
           placeholderTextColor="#8e8e93"
@@ -211,7 +221,7 @@ export function MayaPlanCard({
           }}
         />
       ) : null}
-    </View>
+    </KeyboardAnswer>
   );
 }
 
@@ -234,8 +244,9 @@ export function MayaHabitCard({
   const ready = habitIsReady(answers, draft);
   const daysShort = habitDaysShortfall(answers, draft);
   const steps = keptStepTitles(draft);
+  const poke = useKeyboardPoke();
   return (
-    <View style={styles.stack}>
+    <KeyboardAnswer mode="focus" style={styles.stack}>
       <View style={styles.summary}>
         <Text style={styles.summaryTitle}>{draft.title.trim() || 'Your goal'}</Text>
         {steps.map((step, index) => (
@@ -289,6 +300,7 @@ export function MayaHabitCard({
             onDraft({ ...draft, habitCustom: habitCustom.replace(/[^0-9]/g, ''), habitSkipped: false })
           }
           keyboardType="number-pad"
+          onFocus={poke}
           placeholder={SHAPE_COPY.minutesPlaceholder}
           placeholderTextColor="#8e8e93"
           maxLength={4}
@@ -355,7 +367,7 @@ export function MayaHabitCard({
       >
         <Text style={styles.choiceText}>{SHAPE_COPY.habitSkip}</Text>
       </Pressable>
-    </View>
+    </KeyboardAnswer>
   );
 }
 

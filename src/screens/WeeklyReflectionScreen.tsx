@@ -922,7 +922,7 @@ export default function WeeklyReflectionScreen({ navigation, route }: Props) {
       return [`${REFLECTION_COPY.nextUp}: ${step.title || 'Untitled'} · ${goal?.title || 'Untitled'}`];
     });
     return (
-      <KeyboardSafe style={styles.screen}>
+      <KeyboardSafe behavior="padding" style={styles.screen}>
         <View style={styles.trailPad}>
           <SectionTrail current={trailCurrent(section)} reached={reached} onPress={jumpTo} />
         </View>

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAnswer, useKeyboardPoke } from '../lib/keyboardScroll';
 import { DatePickerModal } from './DatePickerModal';
 import { formFieldStyles } from './FormFields';
 import { TimePickerModal } from './TimePickerModal';
@@ -132,6 +133,7 @@ export function GoalAdjustCard({
   onChange,
   onOpenGoal,
 }: Props) {
+  const poke = useKeyboardPoke();
   const goal = nodes.find((item) => item.id === goalId) ?? null;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
@@ -261,7 +263,7 @@ export function GoalAdjustCard({
   };
 
   return (
-    <View style={styles.card}>
+    <KeyboardAnswer mode="focus" style={styles.card}>
       {answer === 'busy' ? (
         <View style={styles.suggestion}>
           <Text style={styles.suggestionText}>
@@ -274,6 +276,7 @@ export function GoalAdjustCard({
               <Text style={styles.editorLabel}>{REFLECTION_COPY.target}</Text>
               <TextInput
                 value={targetDraft}
+                onFocus={poke}
                 onChangeText={setTargetDraft}
                 onBlur={saveTarget}
                 onSubmitEditing={saveTarget}
@@ -347,6 +350,7 @@ export function GoalAdjustCard({
           ) : (
             <TextInput
               value={whyDraft}
+              onFocus={poke}
               onChangeText={setWhyDraft}
               onBlur={saveWhy}
               onSubmitEditing={saveWhy}
@@ -385,6 +389,7 @@ export function GoalAdjustCard({
               {editing ? (
                 <TextInput
                   value={titleDraft}
+                  onFocus={poke}
                   onChangeText={setTitleDraft}
                   onBlur={() => saveTitle(step)}
                   onSubmitEditing={() => saveTitle(step)}
@@ -432,6 +437,7 @@ export function GoalAdjustCard({
       {showAdd ? (
         <TextInput
           value={stepDraft}
+          onFocus={poke}
           onChangeText={setStepDraft}
           onSubmitEditing={addStep}
           placeholder={leaves.length === 0 ? REFLECTION_COPY.nextThing : REFLECTION_COPY.addStep}
@@ -492,7 +498,7 @@ export function GoalAdjustCard({
           }}
         />
       ) : null}
-    </View>
+    </KeyboardAnswer>
   );
 }
 

@@ -17,6 +17,7 @@ import {
   mayaWinsLine,
 } from '../constants/maya/reflection';
 import { REFLECTION_ANSWERS, REFLECTION_COPY, type ReflectionAnswerId } from '../constants/reflection';
+import { KeyboardChatScope, useKeyboardChatScroll } from '../lib/keyboardScroll';
 import { getDisplayName } from '../lib/profileApi';
 import type { ReflectionDraft, ReflectionSection } from '../lib/reflectionDraft';
 import { answerLabel, personName } from '../lib/reflectionFlow';
@@ -109,6 +110,8 @@ export function MayaReflectionThread(props: {
   const contentRef = useRef<ViewInstance>(null);
   const anchors = useRef<Partial<Record<ReflectionTrailId, number>>>({});
   const followEnd = useRef(true);
+  // Thread sits below the scroll content's 16px top padding.
+  const chatScroll = useKeyboardChatScroll(scrollRef, contentRef, () => followEnd.current, 16);
   const scrollY = useRef(0);
   const viewportH = useRef(0);
   const prevEditing = useRef<ReflectionEdit | null>(null);
@@ -220,10 +223,11 @@ export function MayaReflectionThread(props: {
         );
 
   return (
+    <KeyboardChatScope scope={chatScroll.scope}>
     <ScrollView
       ref={scrollRef}
       style={styles.scroll}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingBottom: 32 + chatScroll.inset }]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
       scrollEventThrottle={16}
@@ -232,11 +236,13 @@ export function MayaReflectionThread(props: {
       }}
       onLayout={(event) => {
         viewportH.current = event.nativeEvent.layout.height;
+        chatScroll.onLayout();
       }}
       onContentSizeChange={() => {
         if (followEnd.current) {
           scrollRef.current?.scrollTo({ y: 100000, animated: true });
         }
+        chatScroll.onContentSizeChange();
       }}
     >
       <View ref={contentRef} collapsable={false} style={styles.thread}>
@@ -598,6 +604,7 @@ export function MayaReflectionThread(props: {
       ) : null}
       </View>
     </ScrollView>
+    </KeyboardChatScope>
   );
 }
 

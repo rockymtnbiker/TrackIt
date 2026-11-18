@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardSafe } from '../components/KeyboardSafe';
@@ -25,6 +26,7 @@ import { MAYA_CLOSING, closingHello, closingSeeYou } from '../constants/maya/clo
 import { MAYA_DISCOVER, type MayaNode } from '../constants/maya/discover';
 import { HELPER_OPTIONS, LEVEL_OPTIONS, SHAPE_COPY } from '../constants/maya/shape';
 import { WEEKDAY_NAMES } from '../lib/goalDetailText';
+import { KeyboardAnswer, KeyboardChatScope, useKeyboardChatScroll, useKeyboardPoke } from '../lib/keyboardScroll';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import {
@@ -114,6 +116,8 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const { user } = useAuth();
   const { settings, updateSettings } = useSettings();
   const scrollRef = useRef<ScrollViewInstance>(null);
+  const contentRef = useRef<ViewInstance>(null);
+  const followEnd = useRef(true);
   const lock = useRef(false);
   const saveLock = useRef(false);
   const savedGoalId = useRef<string | null>(null);
@@ -133,6 +137,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const [sheet, setSheet] = useState(false);
   const [archive, setArchive] = useState<Frozen[]>([]);
   const [goalNumber, setGoalNumber] = useState(1);
+  const chatScroll = useKeyboardChatScroll(scrollRef, contentRef, () => followEnd.current);
 
   useEffect(() => {
     lock.current = false;
@@ -502,15 +507,25 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const levelRevisited = walk.cursor < walk.path.length - 1;
 
   return (
-    <KeyboardSafe style={styles.screen}>
+    <KeyboardChatScope scope={chatScroll.scope}>
+    <KeyboardSafe behavior="padding" style={styles.screen}>
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
-        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}
+        contentContainerStyle={chatScroll.inset > 0 ? { paddingBottom: chatScroll.inset } : undefined}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
-        onContentSizeChange={scrollToEnd}
+        onLayout={chatScroll.onLayout}
+        onContentSizeChange={() => {
+          scrollToEnd();
+          chatScroll.onContentSizeChange();
+        }}
       >
+        <View
+          ref={contentRef}
+          collapsable={false}
+          style={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}
+        >
         {archive.map((item, index) => (
           <FrozenView key={`past-${index}`} item={item} />
         ))}
@@ -620,6 +635,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
           </>
         ) : null}
         {typing ? <TypingDots /> : null}
+        </View>
       </ScrollView>
       <Modal
         visible={sheet}
@@ -674,6 +690,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
         </View>
       </Modal>
     </KeyboardSafe>
+    </KeyboardChatScope>
   );
 }
 
@@ -898,6 +915,7 @@ function DiscoverControls({
   onAnswer: (value: string | string[] | number | null) => void;
   onPatch: (value: MayaAnswers[string]) => void;
 }) {
+  const poke = useKeyboardPoke();
   const options = visibleOptions(MAYA_DISCOVER, node, answers);
   if (node.kind === 'message' || node.kind === 'playback') {
     return (
@@ -963,10 +981,12 @@ function DiscoverControls({
     const value = typeof answers[node.id] === 'string' ? answers[node.id] : '';
     const text = typeof value === 'string' ? value : '';
     return (
-      <View style={styles.stack}>
+      <KeyboardAnswer mode="tail" style={styles.stack}>
         <TextInput
           value={text}
           onChangeText={onPatch}
+          onFocus={poke}
+          onContentSizeChange={poke}
           placeholder={node.placeholder}
           placeholderTextColor="#8e8e93"
           multiline
@@ -976,7 +996,7 @@ function DiscoverControls({
           accessibilityLabel={node.placeholder ?? 'Your answer'}
         />
         <ChoiceButton label="Next" disabled={text.trim().length === 0} onPress={() => onAnswer(text)} />
-      </View>
+      </KeyboardAnswer>
     );
   }
   const min = node.scaleMin ?? 1;

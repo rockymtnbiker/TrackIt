@@ -8,6 +8,7 @@ import {
   type MayaAnswers,
   type MayaStep,
 } from './mayaFlow';
+import { createJobDraft, submitJob, type JobDraft, type JobStepId } from './mayaJob';
 import {
   createShapeDraft,
   focusKey,
@@ -18,7 +19,8 @@ import {
 
 export type StepRef =
   | { kind: 'discover'; id: string }
-  | { kind: 'shape'; id: ShapeStepId };
+  | { kind: 'shape'; id: ShapeStepId }
+  | { kind: 'job'; id: JobStepId };
 
 export type MayaWalk = {
   path: StepRef[];
@@ -26,12 +28,14 @@ export type MayaWalk = {
   cursor: number;
   answers: MayaAnswers;
   draft: ShapeDraft | null;
+  /** Get a job answers. Null for every other area. */
+  job: JobDraft | null;
   /**
    * Shape steps cut off by a changed answer. Restored when the same coaching
    * focus is reached again; dropped when the focus changes.
    */
   shapeHold: StepRef[];
-  action?: 'setup' | 'close';
+  action?: 'setup' | 'close' | 'save' | 'own';
 };
 
 export type WalkOptions = {
@@ -42,8 +46,6 @@ export type WalkOptions = {
 
 const BRANCH_IDS = new Set([
   'pickOne',
-  'jobStage',
-  'jobHard',
   'healthArea',
   'workoutHard',
   'eatHard',
@@ -60,6 +62,7 @@ export function initialWalk(): MayaWalk {
     cursor: 0,
     answers: {},
     draft: null,
+    job: null,
     shapeHold: [],
   };
 }
@@ -71,6 +74,25 @@ export function rewindWalk(walk: MayaWalk, index: number): MayaWalk {
   return { ...walk, cursor: index, shapeHold: [], action: undefined };
 }
 
+/** Another job-flow goal starts again at the area question. Age and temperature stay. */
+export function jobAnotherWalk(answers: MayaAnswers): MayaWalk {
+  const kept: MayaAnswers = {};
+  if (typeof answers.age === 'string' && answers.age) {
+    kept.age = answers.age;
+  }
+  if (typeof answers.temp === 'string' && answers.temp) {
+    kept.temp = answers.temp;
+  }
+  return {
+    path: [{ kind: 'discover', id: 'area' }],
+    cursor: 0,
+    answers: kept,
+    draft: null,
+    job: null,
+    shapeHold: [],
+  };
+}
+
 export function nextGoalWalk(answers: MayaAnswers): MayaWalk {
   const age = answers.age;
   return {
@@ -78,6 +100,7 @@ export function nextGoalWalk(answers: MayaAnswers): MayaWalk {
     cursor: 0,
     answers: typeof age === 'string' && age ? { age } : {},
     draft: null,
+    job: null,
     shapeHold: [],
   };
 }
@@ -141,6 +164,7 @@ function advance(start: MayaWalk, options: WalkOptions): MayaWalk {
   let shapeHold = [...start.shapeHold];
   let answers = start.answers;
   let draft = start.draft;
+  let job = start.job;
   let guard = 0;
 
   const finish = (cursor: number, action?: MayaWalk['action']): MayaWalk => ({
@@ -148,6 +172,7 @@ function advance(start: MayaWalk, options: WalkOptions): MayaWalk {
     cursor,
     answers,
     draft,
+    job,
     shapeHold,
     action,
   });
@@ -157,6 +182,10 @@ function advance(start: MayaWalk, options: WalkOptions): MayaWalk {
     const current = path[path.length - 1];
     if (!current) {
       return finish(0);
+    }
+
+    if (current.kind === 'job') {
+      return finish(path.length - 1);
     }
 
     if (current.kind === 'shape') {
@@ -191,8 +220,12 @@ function advance(start: MayaWalk, options: WalkOptions): MayaWalk {
         cursor: entered.cursor,
         answers,
         draft: entered.draft,
+        job,
         shapeHold: entered.shapeHold,
       };
+    }
+    if (step.type === 'node' && step.id === 'job-entry') {
+      return beginJob(path, answers, draft, options);
     }
     if (step.type !== 'node') {
       return finish(path.length - 1);
@@ -445,6 +478,65 @@ function skipKnownAge(step: MayaStep, ageKnown: boolean): MayaStep {
   }
   const next = resolveNext(MAYA_DISCOVER, age, {});
   return next.type === 'stay' ? step : next;
+}
+
+function beginJob(
+  path: StepRef[],
+  answers: MayaAnswers,
+  draft: ShapeDraft | null,
+  options: WalkOptions,
+): MayaWalk {
+  const temp = typeof answers.temp === 'string' ? answers.temp : '';
+  const nextPath: StepRef[] = [...path, { kind: 'job', id: 'why' }];
+  return {
+    path: nextPath,
+    cursor: nextPath.length - 1,
+    answers,
+    draft,
+    job: createJobDraft(temp, options.level),
+    shapeHold: [],
+  };
+}
+
+/** Move one step in the Get a job flow. The patch is the answer just given. */
+export function continueJob(walk: MayaWalk, patch: Partial<JobDraft>, options: WalkOptions): MayaWalk {
+  const step = walk.path[walk.cursor];
+  if (!step || step.kind !== 'job' || !walk.job) {
+    return walk;
+  }
+  const move = submitJob(walk.job, step.id, patch, options.askLevel);
+  if (move.type === 'area') {
+    return leaveJobForArea(walk);
+  }
+  const job = move.job;
+  if (move.type === 'save' || move.type === 'own') {
+    return { ...walk, job, action: move.type };
+  }
+  const path = [...walk.path.slice(0, walk.cursor + 1), { kind: 'job' as const, id: move.id }];
+  return {
+    path,
+    cursor: path.length - 1,
+    answers: walk.answers,
+    draft: walk.draft,
+    job,
+    shapeHold: [],
+  };
+}
+
+function leaveJobForArea(walk: MayaWalk): MayaWalk {
+  const index = walk.path.findIndex((step) => step.kind === 'discover' && step.id === 'area');
+  const path = index >= 0 ? walk.path.slice(0, index + 1) : [{ kind: 'discover' as const, id: 'area' }];
+  const answers = { ...walk.answers };
+  delete answers.area;
+  delete answers.pickOne;
+  return {
+    path,
+    cursor: path.length - 1,
+    answers,
+    draft: null,
+    job: null,
+    shapeHold: [],
+  };
 }
 
 export function currentDiscoverNode(walk: MayaWalk): MayaNode | null {

@@ -1,3 +1,5 @@
+import { JOB_OPENING } from './jobFlow';
+
 export type MayaDestination =
   | { type: 'node'; id: string }
   | { type: 'close' }
@@ -62,11 +64,11 @@ export const MAYA_DISCOVER: MayaContent = {
     {
       id: 'intro',
       kind: 'message',
-      text: "Hey [name], I'm Maya, your automated advisor. I'm here to help you become your best you. Want to figure out what to work on first together, or do you already know?",
+      text: JOB_OPENING.intro,
       next: { type: 'choice' },
       options: [
-        { id: 'help', label: 'Help me figure it out', to: { type: 'node', id: 'age' } },
-        { id: 'know', label: 'I already know', to: { type: 'setup' } },
+        { id: 'help', label: JOB_OPENING.letsGo, to: { type: 'node', id: 'age' } },
+        { id: 'know', label: JOB_OPENING.own, to: { type: 'setup' } },
       ],
     },
     {
@@ -87,7 +89,7 @@ export const MAYA_DISCOVER: MayaContent = {
     {
       id: 'temp',
       kind: 'single',
-      text: "Before we pick anything, how's life feeling lately?",
+      text: JOB_OPENING.temp,
       next: { type: 'goto', id: 'area' },
       options: [
         { id: 'level-up', label: 'Pretty good, I want to level up' },
@@ -99,17 +101,11 @@ export const MAYA_DISCOVER: MayaContent = {
     {
       id: 'area',
       kind: 'multi',
-      text: 'Which of these is taking up the most space in your head right now?',
+      text: JOB_OPENING.area,
       next: { type: 'areas' },
       options: [
+        { id: 'job', label: JOB_OPENING.job, branch: 'job-entry' },
         { id: 'classes', label: 'Classes and grades' },
-        {
-          id: 'job',
-          label: 'Landing a job',
-          branch: 'jobStage',
-          phraseNode: 'jobHard',
-        },
-        { id: 'money', label: 'Money' },
         { id: 'health', label: 'Health and fitness', branch: 'healthArea' },
         { id: 'dating', label: 'Dating and relationships' },
         { id: 'friends', label: 'Friends and social life' },
@@ -125,60 +121,10 @@ export const MAYA_DISCOVER: MayaContent = {
       next: { type: 'branch' },
     },
     {
-      id: 'jobStage',
-      kind: 'single',
-      text: 'Where are you in the search?',
-      next: { type: 'goto', id: 'jobHard' },
-      options: [
-        { id: 'not-started', label: "Haven't started" },
-        { id: 'know', label: "I know what I want but haven't applied" },
-        { id: 'applying', label: 'Applying, not hearing back' },
-        { id: 'interviews', label: 'Interviews coming up' },
-      ],
-    },
-    {
-      id: 'jobHard',
-      kind: 'single',
-      playsPhrase: true,
-      text: 'What feels like the hardest part?',
-      next: { type: 'goto', id: 'better' },
-      options: [
-        {
-          id: 'fit',
-          label: "I'm not sure what kind of job fits me",
-          phrase: "you're not sure what kind of job fits you",
-        },
-        {
-          id: 'experience',
-          label: "Everyone wants experience I don't have",
-          phrase: "everyone wants experience you don't have",
-        },
-        {
-          id: 'silence',
-          label: 'I apply and never hear back',
-          phrase: 'you apply and never hear back',
-        },
-        {
-          id: 'resume',
-          label: "My resume doesn't stand out",
-          phrase: "your resume doesn't stand out",
-        },
-        {
-          id: 'interviews',
-          label: 'Interviews make me nervous',
-          phrase: 'interviews make you nervous',
-        },
-        {
-          id: 'time',
-          label: 'Finding time with classes and work',
-          phrase: "it's hard to find time around classes and work",
-        },
-        {
-          id: 'network',
-          label: "I don't know anyone in the field",
-          phrase: "you don't know anyone in the field",
-        },
-      ],
+      id: 'job-entry',
+      kind: 'message',
+      text: '',
+      next: { type: 'goto', id: 'area' },
     },
     {
       id: 'healthArea',

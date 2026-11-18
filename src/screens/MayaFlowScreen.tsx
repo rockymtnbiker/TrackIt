@@ -15,7 +15,10 @@ import {
   type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { InviteCodeSheet } from '../components/InviteCodeSheet';
+import { SupportRequestSheet } from '../components/SupportRequestSheet';
 import { KeyboardSafe } from '../components/KeyboardSafe';
+import { MayaJobControls } from '../components/MayaJobControls';
 import {
   MayaCoachCard,
   MayaHabitCard,
@@ -23,6 +26,7 @@ import {
   MayaSummaryCard,
 } from '../components/MayaShapeView';
 import { MAYA_CLOSING, closingHello, closingSeeYou } from '../constants/maya/closing';
+import { JOB_CLOSING } from '../constants/maya/jobFlow';
 import { MAYA_DISCOVER, type MayaNode } from '../constants/maya/discover';
 import { HELPER_OPTIONS, LEVEL_OPTIONS, SHAPE_COPY } from '../constants/maya/shape';
 import { WEEKDAY_NAMES } from '../lib/goalDetailText';
@@ -31,10 +35,12 @@ import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import {
   areaCommitted,
+  continueJob,
   continueWalk,
   currentDiscoverNode,
   discoverAnswerLabel,
   initialWalk,
+  jobAnotherWalk,
   nextGoalWalk,
   rewindWalk,
   stepCompleted,
@@ -50,7 +56,16 @@ import {
   visibleOptions,
   type MayaAnswers,
 } from '../lib/mayaFlow';
+import { deleteGoal } from '../lib/goalTreeApi';
 import { getMayaLevelAsked, markMayaLevelAsked, saveMayaHelper } from '../lib/mayaHelper';
+import {
+  jobAnswerLabel,
+  jobClosingLine,
+  jobHelperStorageId,
+  jobPrompt,
+  saveJobGoal,
+  type JobDraft,
+} from '../lib/mayaJob';
 import {
   coachingScript,
   habitCopy,
@@ -66,7 +81,7 @@ import {
 import { ageRangeFromChoice, getAgeRange, getDisplayName, markOnboarded, saveAgeRange } from '../lib/profileApi';
 import type { MayaLevel } from '../lib/settingsApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
-import { finishOnboarding, finishOnboardingToCoach } from '../navigation/onboardingHandoff';
+import { finishOnboarding } from '../navigation/onboardingHandoff';
 import { formatDateMDY } from '../utils/date';
 
 type Props = NativeStackScreenProps<CommunityStackParamList, 'Maya'>;
@@ -117,10 +132,10 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const { settings, updateSettings } = useSettings();
   const scrollRef = useRef<ScrollViewInstance>(null);
   const contentRef = useRef<ViewInstance>(null);
-  const followEnd = useRef(true);
   const lock = useRef(false);
   const saveLock = useRef(false);
   const savedGoalId = useRef<string | null>(null);
+  const persistedJobId = useRef<string | null>(null);
   const lastSavedId = useRef<string | null>(null);
   const fromOnboarding = (navigation.getState().routeNames as string[]).includes('FirstGoal');
   const ageKnownRef = useRef(false);
@@ -135,8 +150,12 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const [closing, setClosing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sheet, setSheet] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [jobNote, setJobNote] = useState<'sent' | 'good' | null>(null);
   const [archive, setArchive] = useState<Frozen[]>([]);
   const [goalNumber, setGoalNumber] = useState(1);
+  const followEnd = useRef(true);
   const chatScroll = useKeyboardChatScroll(scrollRef, contentRef, () => followEnd.current);
 
   useEffect(() => {
@@ -179,7 +198,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
     };
   }, [user?.id]);
 
-  const visibleEnd = closing ? walk.path.length + 3 : walk.cursor + 1;
+  const visibleEnd = closing ? walk.path.length + (walk.job ? 2 : 3) : walk.cursor + 1;
   const shown = Math.min(revealed, visibleEnd);
   const stepCount = Math.min(shown, closing ? walk.path.length : walk.cursor + 1);
   const closingCount = closing ? Math.max(0, shown - walk.path.length) : 0;
@@ -195,13 +214,11 @@ export default function MayaFlowScreen({ navigation }: Props) {
     return () => clearTimeout(timer);
   }, [revealed, visibleEnd]);
 
-  const scrollToEnd = useCallback(() => {
-    scrollRef.current?.scrollTo({ y: 100000, animated: true });
-  }, []);
-
   useEffect(() => {
-    scrollToEnd();
-  }, [shown, archive.length, closing, scrollToEnd]);
+    if (!inviteOpen && followEnd.current) {
+      scrollRef.current?.scrollToEnd({ animated: false });
+    }
+  }, [inviteOpen, shown, archive.length, closing]);
 
   const walkOptions = useCallback((): WalkOptions => {
     return {
@@ -229,26 +246,26 @@ export default function MayaFlowScreen({ navigation }: Props) {
 
   const openSavedGoal = useCallback(
     (startEditing = false) => {
-      const goalId = savedGoalId.current;
+      const goalId = savedGoalId.current ?? lastSavedId.current;
       if (!goalId) {
         navigation.goBack();
         return;
       }
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 1,
-          routes: [
-            { name: 'CommunityMain' },
-            {
-              name: 'Goal',
-              params: startEditing ? { goalId, startEditing: true } : { goalId },
-            },
-          ],
-        }),
-      );
+      navigation.replace('Goal', startEditing ? { goalId, startEditing: true } : { goalId });
     },
     [navigation],
   );
+
+  const goToToday = useCallback(() => {
+    const tab = navigation.getParent();
+    navigation.goBack();
+    tab?.dispatch(
+      CommonActions.navigate({
+        name: 'Today',
+        params: { screen: 'TodayMain' },
+      }),
+    );
+  }, [navigation]);
 
   const confirmLeave = useCallback(() => {
     if (saving) {
@@ -263,16 +280,12 @@ export default function MayaFlowScreen({ navigation }: Props) {
       navigation.goBack();
       return;
     }
-    if (closing) {
-      openSavedGoal(false);
-      return;
-    }
-    if (areaCommitted(walkRef.current)) {
+    if (!closing && areaCommitted(walkRef.current)) {
       setSheet(true);
       return;
     }
-    navigation.goBack();
-  }, [closing, fromOnboarding, navigation, openSavedGoal, saving]);
+    goToToday();
+  }, [closing, fromOnboarding, goToToday, navigation, saving]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -361,6 +374,53 @@ export default function MayaFlowScreen({ navigation }: Props) {
     [commitWalk, walkOptions],
   );
 
+  const dropPersistedJob = useCallback(() => {
+    const id = persistedJobId.current;
+    if (!id) {
+      return;
+    }
+    persistedJobId.current = null;
+    if (savedGoalId.current === id) {
+      savedGoalId.current = null;
+    }
+    void deleteGoal(id).catch(() => {
+      // A leftover goal is less harmful than blocking the chat. The next save builds a fresh one.
+    });
+  }, []);
+
+  const rememberJob = useCallback(
+    async (job: JobDraft) => {
+      if (persistedJobId.current) {
+        return persistedJobId.current;
+      }
+      const goalId = await saveJobGoal(job);
+      persistedJobId.current = goalId;
+      savedGoalId.current = goalId;
+      lastSavedId.current = goalId;
+      if (fromOnboarding) {
+        await markOnboarded();
+      }
+      if (user?.id) {
+        await saveMayaHelper(user.id, goalId, jobHelperStorageId(job.helper));
+      }
+      return goalId;
+    },
+    [fromOnboarding, user?.id],
+  );
+
+  const finishSavedJob = useCallback(
+    (goalId: string, startEditing: boolean) => {
+      savedGoalId.current = goalId;
+      lastSavedId.current = goalId;
+      if (fromOnboarding) {
+        finishOnboarding(goalId);
+        return;
+      }
+      openSavedGoal(startEditing);
+    },
+    [fromOnboarding, openSavedGoal],
+  );
+
   const rewindTo = useCallback(
     (index: number) => {
       if (closing || saving) {
@@ -370,11 +430,102 @@ export default function MayaFlowScreen({ navigation }: Props) {
       if (index < 0 || index >= current.cursor || index >= current.path.length) {
         return;
       }
+      dropPersistedJob();
       replaceWalk(rewindWalk(current, index));
       setRevealed(index + 1);
     },
-    [closing, replaceWalk, saving],
+    [closing, dropPersistedJob, replaceWalk, saving],
   );
+
+  const answerJob = useCallback(
+    (patch: Partial<JobDraft>) => {
+      if (lock.current || saving || closing || !profileReady) {
+        return;
+      }
+      const current = walkRef.current;
+      if (!current.job) {
+        return;
+      }
+      const next = continueJob(current, patch, walkOptions());
+      if (next.action === 'own' && next.job) {
+        lock.current = true;
+        setSaving(true);
+        void (async () => {
+          try {
+            const goalId = await rememberJob(next.job as JobDraft);
+            if (!levelAskedRef.current) {
+              await updateSettings({ mayaLevel: 'occasional' });
+            }
+            finishSavedJob(goalId, true);
+          } catch (error) {
+            Alert.alert('Could not save your goal', saveError(error));
+          } finally {
+            saveLock.current = false;
+            setSaving(false);
+          }
+        })();
+        return;
+      }
+      if (next.action === 'save' && next.job) {
+        lock.current = true;
+        setSaving(true);
+        void (async () => {
+          try {
+            const job = next.job as JobDraft;
+            const goalId = await rememberJob(job);
+            if (job.levelChosen) {
+              await updateSettings({ mayaLevel: job.level });
+              levelAskedRef.current = true;
+              askLevelRef.current = false;
+              if (user?.id) {
+                await markMayaLevelAsked(user.id);
+              }
+            }
+            savedGoalId.current = goalId;
+            lastSavedId.current = goalId;
+            setWalk((value) => ({ ...value, job, cursor: value.path.length, action: undefined }));
+            setClosing(true);
+          } catch (error) {
+            Alert.alert('Could not save your goal', saveError(error));
+          } finally {
+            saveLock.current = false;
+            setSaving(false);
+          }
+        })();
+        return;
+      }
+      if (patch.invite === 'now' && next.job) {
+        lock.current = true;
+        setSaving(true);
+        void (async () => {
+          try {
+            await rememberJob(next.job as JobDraft);
+            replaceWalk(next);
+            setInviteOpen(true);
+          } catch (error) {
+            Alert.alert('Could not save your goal', saveError(error));
+          } finally {
+            saveLock.current = false;
+            setSaving(false);
+          }
+        })();
+        return;
+      }
+      lock.current = true;
+      replaceWalk(next);
+    },
+    [closing, finishSavedJob, profileReady, rememberJob, replaceWalk, saving, updateSettings, user?.id, walkOptions],
+  );
+
+  const patchJob = useCallback((patch: Partial<JobDraft>) => {
+    const current = walkRef.current;
+    if (!current.job) {
+      return;
+    }
+    const next = { ...current, job: { ...current.job, ...patch } };
+    walkRef.current = next;
+    setWalk(next);
+  }, []);
 
   const editSteps = useCallback(() => {
     const index = walkRef.current.path.findIndex(
@@ -419,10 +570,42 @@ export default function MayaFlowScreen({ navigation }: Props) {
   }, [fromOnboarding, updateSettings, user?.id]);
 
   const saveAndFinish = useCallback(() => {
-    if (saveLock.current || savedGoalId.current) {
+    if (saveLock.current) {
       return;
     }
     const current = walkRef.current;
+    if (current.job) {
+      saveLock.current = true;
+      setSaving(true);
+      setSheet(false);
+      void (async () => {
+        try {
+          const goalId = await rememberJob(current.job as JobDraft);
+          if (current.job?.levelChosen) {
+            await updateSettings({ mayaLevel: current.job.level });
+            levelAskedRef.current = true;
+            askLevelRef.current = false;
+            if (user?.id) {
+              await markMayaLevelAsked(user.id);
+            }
+          }
+          if (fromOnboarding) {
+            finishSavedJob(goalId, true);
+            return;
+          }
+          goToToday();
+        } catch (error) {
+          Alert.alert('Could not save your goal', saveError(error));
+        } finally {
+          saveLock.current = false;
+          setSaving(false);
+        }
+      })();
+      return;
+    }
+    if (savedGoalId.current) {
+      return;
+    }
     saveLock.current = true;
     setSaving(true);
     void (async () => {
@@ -446,7 +629,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
           finishOnboarding(goalId);
           return;
         }
-        openSavedGoal(true);
+        goToToday();
       } catch (error) {
         Alert.alert('Could not save your goal', saveError(error));
       } finally {
@@ -454,7 +637,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
         setSaving(false);
       }
     })();
-  }, [fromOnboarding, openSavedGoal, updateSettings, user?.id]);
+  }, [finishSavedJob, fromOnboarding, goToToday, rememberJob, updateSettings, user?.id]);
 
   const describe = useCallback(
     (step: StepRef): Described => {
@@ -473,12 +656,23 @@ export default function MayaFlowScreen({ navigation }: Props) {
           card: null,
         };
       }
-      if (!draft) {
+      if (step.kind === 'job') {
+        if (!walk.job) {
+          return { before: [], after: [], user: null, card: null };
+        }
+        return {
+          before: jobPrompt(step.id, walk.job).map((text) => ({ text })),
+          after: [],
+          user: jobAnswerLabel(step.id, walk.job),
+          card: null,
+        };
+      }
+      if (step.kind !== 'shape' || !draft) {
         return { before: [], after: [], user: null, card: null };
       }
       return describeShape(step.id, draft, answers, settings.weekStart);
     },
-    [name, settings.weekStart, walk.answers, walk.draft],
+    [name, settings.weekStart, walk.answers, walk.draft, walk.job],
   );
 
   const writeAnother = useCallback(() => {
@@ -487,19 +681,30 @@ export default function MayaFlowScreen({ navigation }: Props) {
     for (const step of current.path) {
       frozen.push(...freezeStep(describe(step)));
     }
-    frozen.push({ kind: 'maya', text: closingHello(name) });
-    frozen.push({ kind: 'maya', text: closingSeeYou(WEEKDAY_NAMES[settings.reflectionDay]) });
-    frozen.push({ kind: 'maya', text: MAYA_CLOSING.coach });
-    frozen.push({ kind: 'user', text: MAYA_CLOSING.another });
+    if (current.job) {
+      frozen.push({
+        kind: 'maya',
+        text: jobClosingLine(name, WEEKDAY_NAMES[settings.reflectionDay], settings.mayaLevel),
+      });
+      frozen.push({ kind: 'maya', text: JOB_CLOSING.coach });
+      frozen.push({ kind: 'user', text: JOB_CLOSING.another });
+    } else {
+      frozen.push({ kind: 'maya', text: closingHello(name) });
+      frozen.push({ kind: 'maya', text: closingSeeYou(WEEKDAY_NAMES[settings.reflectionDay]) });
+      frozen.push({ kind: 'maya', text: MAYA_CLOSING.coach });
+      frozen.push({ kind: 'user', text: MAYA_CLOSING.another });
+    }
     const number = goalNumber + 1;
     setArchive((items) => [...items, ...frozen, { kind: 'divider', label: `Goal ${number}` }]);
     setGoalNumber(number);
     askLevelRef.current = !levelAskedRef.current;
-    replaceWalk(nextGoalWalk(current.answers));
+    setJobNote(null);
+    persistedJobId.current = null;
+    replaceWalk(current.job ? jobAnotherWalk(current.answers) : nextGoalWalk(current.answers));
     setClosing(false);
     setRevealed(0);
     savedGoalId.current = null;
-  }, [describe, goalNumber, name, replaceWalk, settings.reflectionDay]);
+  }, [describe, goalNumber, name, replaceWalk, settings.mayaLevel, settings.reflectionDay]);
 
   const showEditSteps = walk.path.some(
     (step, index) => step.kind === 'shape' && step.id === 'coach' && index < walk.cursor,
@@ -509,6 +714,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
   return (
     <KeyboardChatScope scope={chatScroll.scope}>
     <KeyboardSafe behavior="padding" style={styles.screen}>
+      <View style={styles.scroll}>
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
@@ -517,7 +723,9 @@ export default function MayaFlowScreen({ navigation }: Props) {
         keyboardDismissMode="interactive"
         onLayout={chatScroll.onLayout}
         onContentSizeChange={() => {
-          scrollToEnd();
+          if (followEnd.current) {
+            scrollRef.current?.scrollToEnd({ animated: false });
+          }
           chatScroll.onContentSizeChange();
         }}
       >
@@ -550,6 +758,8 @@ export default function MayaFlowScreen({ navigation }: Props) {
                   onPatchAnswer={patchAnswer}
                   onDraft={patchDraft}
                   onAdvanceShape={advanceShape}
+                  onAnswerJob={answerJob}
+                  onPatchJob={patchJob}
                   onEditSteps={editSteps}
                   onLevel={(id) => {
                     const draft = walkRef.current.draft;
@@ -601,28 +811,36 @@ export default function MayaFlowScreen({ navigation }: Props) {
             </View>
           );
         })}
-        {closingCount >= 1 ? <MayaBubble text={closingHello(name)} /> : null}
-        {closingCount >= 2 ? (
+        {closingCount >= 1 ? (
+          <MayaBubble
+            text={
+              walk.job
+                ? jobClosingLine(name, WEEKDAY_NAMES[settings.reflectionDay], settings.mayaLevel)
+                : closingHello(name)
+            }
+          />
+        ) : null}
+        {closingCount >= 2 && !walk.job ? (
           <MayaBubble text={closingSeeYou(WEEKDAY_NAMES[settings.reflectionDay])} />
         ) : null}
-        {closingCount >= 3 ? (
+        {closingCount >= (walk.job ? 2 : 3) ? (
           <>
-            <MayaBubble text={MAYA_CLOSING.coach} />
+            <MayaBubble text={walk.job ? JOB_CLOSING.coach : MAYA_CLOSING.coach} />
+            {jobNote === 'sent' ? <MayaBubble text={JOB_CLOSING.sent} /> : null}
+            {jobNote === 'good' ? <MayaBubble text={JOB_CLOSING.good} /> : null}
             <View style={styles.choices}>
               <ChoiceButton
-                label={MAYA_CLOSING.talk}
+                label={walk.job ? JOB_CLOSING.talk : MAYA_CLOSING.talk}
+                onPress={() => setCoachOpen(true)}
+              />
+              <ChoiceButton label={walk.job ? JOB_CLOSING.another : MAYA_CLOSING.another} onPress={writeAnother} />
+              <ChoiceButton
+                label={walk.job ? JOB_CLOSING.done : MAYA_CLOSING.done}
                 onPress={() => {
-                  if (fromOnboarding) {
-                    finishOnboardingToCoach();
+                  if (walk.job) {
+                    setJobNote('good');
                     return;
                   }
-                  navigation.popTo('CommunityMain', { openSupport: 'talk' });
-                }}
-              />
-              <ChoiceButton label={MAYA_CLOSING.another} onPress={writeAnother} />
-              <ChoiceButton
-                label={MAYA_CLOSING.done}
-                onPress={() => {
                   const goalId = lastSavedId.current;
                   if (fromOnboarding && goalId) {
                     finishOnboarding(goalId);
@@ -631,12 +849,26 @@ export default function MayaFlowScreen({ navigation }: Props) {
                   openSavedGoal(false);
                 }}
               />
+              <ChoiceButton
+                label={JOB_CLOSING.close}
+                onPress={() => {
+                  const goalId = lastSavedId.current ?? savedGoalId.current;
+                  if (fromOnboarding && goalId) {
+                    finishOnboarding(goalId);
+                    return;
+                  }
+                  if (goalId) {
+                    navigation.replace('Goal', { goalId });
+                  }
+                }}
+              />
             </View>
           </>
         ) : null}
         {typing ? <TypingDots /> : null}
         </View>
       </ScrollView>
+      </View>
       <Modal
         visible={sheet}
         transparent
@@ -669,7 +901,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
               <Text style={styles.sheetText}>Save and finish on my own</Text>
             </Pressable>
             <Pressable
-              onPress={() => navigation.goBack()}
+              onPress={goToToday}
               disabled={saving}
               style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
               accessibilityRole="button"
@@ -689,6 +921,23 @@ export default function MayaFlowScreen({ navigation }: Props) {
           </View>
         </View>
       </Modal>
+      {inviteOpen && walk.job ? (
+        <InviteCodeSheet
+          title="Invite with a code"
+          goalId={persistedJobId.current}
+          goalTitle={walk.job.title}
+          onClose={() => setInviteOpen(false)}
+        />
+      ) : null}
+      {coachOpen ? (
+        <SupportRequestSheet
+          onClose={() => setCoachOpen(false)}
+          onSent={() => {
+            setCoachOpen(false);
+            setJobNote('sent');
+          }}
+        />
+      ) : null}
     </KeyboardSafe>
     </KeyboardChatScope>
   );
@@ -807,6 +1056,8 @@ function CurrentStep({
   onPatchAnswer,
   onDraft,
   onAdvanceShape,
+  onAnswerJob,
+  onPatchJob,
   onEditSteps,
   onLevel,
   onLooksGood,
@@ -821,6 +1072,8 @@ function CurrentStep({
   onPatchAnswer: (id: string, value: MayaAnswers[string]) => void;
   onDraft: (draft: ShapeDraft) => void;
   onAdvanceShape: (draft?: ShapeDraft) => void;
+  onAnswerJob: (patch: Partial<JobDraft>) => void;
+  onPatchJob: (patch: Partial<JobDraft>) => void;
   onEditSteps: () => void;
   onLevel: (id: MayaLevel) => void;
   onLooksGood: () => void;
@@ -837,6 +1090,20 @@ function CurrentStep({
         answers={walk.answers}
         onAnswer={onAnswer}
         onPatch={(value) => onPatchAnswer(node.id, value)}
+      />
+    );
+  }
+  if (step.kind === 'job') {
+    if (!walk.job) {
+      return null;
+    }
+    return (
+      <MayaJobControls
+        step={step.id}
+        job={walk.job}
+        saving={saving}
+        onSubmit={onAnswerJob}
+        onDraft={onPatchJob}
       />
     );
   }

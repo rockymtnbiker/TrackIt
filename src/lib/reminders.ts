@@ -399,7 +399,10 @@ async function collectNotes(): Promise<Note[]> {
   const loaded =
     ids.length > 0 ? await getEntries(ids, addDays(today, -LOOKBACK_DAYS), today) : [];
 
-  const reflection = reflectionNotes(settings.reflectionTime, settings.reflectionDay, today);
+  const reflection =
+    settings.mayaLevel === 'self'
+      ? []
+      : reflectionNotes(settings.reflectionTime, settings.reflectionDay, today);
   if (settings.reminderMode === 'per_goal') {
     const room = Math.max(0, MAX_PENDING - reflection.length);
     const goalNotes = cappedPerGoalNotes(nodes, loaded, today, settings.weekStart).slice(0, room);

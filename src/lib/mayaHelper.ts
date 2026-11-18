@@ -21,8 +21,8 @@ function dismissedKey(userId: string): string {
   return `maya-daily-dismissed:${userId}`;
 }
 
-function nudgeKey(userId: string, goalId: string): string {
-  return `maya-nudge:${userId}:${goalId}`;
+function nudgeKey(userId: string): string {
+  return `maya-nudge:${userId}`;
 }
 
 function levelAskedKey(userId: string): string {
@@ -113,10 +113,13 @@ export function dismissMayaDaily(userId: string, day: string): Promise<void> {
   });
 }
 
-export function mayaNudgeWasShown(userId: string, goalId: string): Promise<boolean> {
+export function mayaNudgeWasShown(userId: string): Promise<boolean> {
   return enqueue(userId, async () => {
     try {
-      return (await AsyncStorage.getItem(nudgeKey(userId, goalId))) === 'shown';
+      const keys = await AsyncStorage.getAllKeys();
+      const exact = nudgeKey(userId);
+      const older = `${exact}:`;
+      return keys.some((key) => key === exact || key.startsWith(older));
     } catch {
       return false;
     }
@@ -144,10 +147,10 @@ export function markMayaLevelAsked(userId: string): Promise<void> {
   });
 }
 
-export function markMayaNudgeShown(userId: string, goalId: string): Promise<void> {
+export function markMayaNudgeShown(userId: string): Promise<void> {
   return enqueue(userId, async () => {
     try {
-      await AsyncStorage.setItem(nudgeKey(userId, goalId), 'shown');
+      await AsyncStorage.setItem(nudgeKey(userId), 'shown');
     } catch {
       // A session ref still keeps the sheet from repeating immediately.
     }

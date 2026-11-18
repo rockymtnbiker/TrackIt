@@ -9,11 +9,7 @@ import {
   weekJustCompleted,
 } from './mayaDaily';
 import { buildChildrenMap, isRepeating } from './goalTree';
-import {
-  getMayaHelper,
-  listMayaGoalIds,
-  mayaNudgeWasShown,
-} from './mayaHelper';
+import { getMayaHelper, mayaNudgeWasShown } from './mayaHelper';
 import type { MayaLevel, WeekStart } from './settingsApi';
 
 export type MayaReaction = {
@@ -46,7 +42,7 @@ function habitOf(goalId: string, nodes: Goal[]): Goal | null {
   return repeating[repeating.length - 1] ?? null;
 }
 
-/** Toast and partner nudge for one successful log or done on a Maya goal. */
+/** Toast and partner nudge for one successful log or done on any goal. */
 export async function planMayaReaction(input: {
   userId: string;
   stepId: string;
@@ -62,10 +58,6 @@ export async function planMayaReaction(input: {
   const none: MayaReaction = { toast: null, nudgeText: null, goalId: null };
   const top = topGoal(input.stepId, input.nodes);
   if (!top) {
-    return none;
-  }
-  const mayaIds = await listMayaGoalIds(input.userId);
-  if (!mayaIds.includes(top.id)) {
     return none;
   }
 
@@ -104,7 +96,7 @@ export async function planMayaReaction(input: {
   }
 
   let nudgeText: string | null = null;
-  if (isFirstLog && !(await mayaNudgeWasShown(input.userId, top.id))) {
+  if (isFirstLog && !(await mayaNudgeWasShown(input.userId))) {
     const shared = await sharedWithAcceptedPartner(top.id);
     if (!shared) {
       const helper = await getMayaHelper(input.userId, top.id);

@@ -70,7 +70,6 @@ import {
   dismissMayaDaily,
   getMayaDailyDismissed,
   getMayaHelper,
-  listMayaGoalIds,
   markMayaNudgeShown,
 } from '../lib/mayaHelper';
 import { getDisplayName } from '../lib/profileApi';
@@ -1396,7 +1395,6 @@ export default function TodayScreen() {
   const [logAmount, setLogAmount] = useState('');
   const [logError, setLogError] = useState<string | null>(null);
   const [dismissedTips, setDismissedTips] = useState<ReadonlySet<string> | null>(null);
-  const [mayaGoalIds, setMayaGoalIds] = useState<string[]>([]);
   const [mayaDismissedOn, setMayaDismissedOn] = useState<string | null>(null);
   const [mayaName, setMayaName] = useState('');
   const [mayaToast, setMayaToast] = useState<string | null>(null);
@@ -1523,22 +1521,16 @@ export default function TodayScreen() {
     useCallback(() => {
       const userId = user?.id;
       if (!userId) {
-        setMayaGoalIds([]);
         setMayaDismissedOn(null);
         setMayaName('');
         return;
       }
       let cancelled = false;
-      void Promise.all([
-        listMayaGoalIds(userId),
-        getMayaDailyDismissed(userId),
-        getDisplayName(),
-      ])
-        .then(([ids, dismissed, name]) => {
+      void Promise.all([getMayaDailyDismissed(userId), getDisplayName()])
+        .then(([dismissed, name]) => {
           if (cancelled) {
             return;
           }
-          setMayaGoalIds(ids);
           setMayaDismissedOn(dismissed);
           setMayaName(name);
         })
@@ -1933,7 +1925,7 @@ export default function TodayScreen() {
           return;
         }
         setMayaNudge({ goalId: reaction.goalId, text: reaction.nudgeText });
-        void markMayaNudgeShown(userId, reaction.goalId);
+        void markMayaNudgeShown(userId);
       } catch (error) {
         console.warn('Maya prompt failed', error);
       }
@@ -2349,7 +2341,6 @@ export default function TodayScreen() {
     />
   );
 
-  const mayaIdSet = useMemo(() => new Set(mayaGoalIds), [mayaGoalIds]);
   const mayaLine = useMemo(
     () =>
       selectedDate === today
@@ -2362,13 +2353,11 @@ export default function TodayScreen() {
             weekStartsOn,
             nodes,
             entries,
-            mayaGoalIds: mayaIdSet,
           })
         : null,
     [
       entries,
       mayaDismissedOn,
-      mayaIdSet,
       mayaName,
       nodes,
       selectedDate,

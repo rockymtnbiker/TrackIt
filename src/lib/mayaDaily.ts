@@ -5,7 +5,7 @@ import {
 } from '../constants/maya/daily';
 import type { Goal, GoalEntry } from '../types/goal';
 import { goalAnalysis } from './goalAnalysis';
-import { buildChildrenMap, dayCount, isRepeating, targetFor } from './goalTree';
+import { buildChildrenMap, isDoneForDay, isRepeating, targetFor } from './goalTree';
 import { parseLocalDate } from './localDate';
 import type { MayaLevel, WeekStart } from './settingsApi';
 import { weekCompleteStatus } from './statusMessages';
@@ -39,12 +39,29 @@ function rootsInPlanOrder(nodes: Goal[]): Goal[] {
     .sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title));
 }
 
-function starterHabit(
-  goalId: string,
-  childrenMap: Map<string | null, Goal[]>,
-): Goal | null {
-  const repeating = (childrenMap.get(goalId) ?? []).filter((child) => isRepeating(child));
-  return repeating[repeating.length - 1] ?? null;
+/** Repeating steps in plan order, including ones nested under other steps. */
+function repeatingUnder(goalId: string, childrenMap: Map<string | null, Goal[]>): Goal[] {
+  const found: Goal[] = [];
+  const walk = (id: string) => {
+    for (const child of childrenMap.get(id) ?? []) {
+      if (isRepeating(child)) {
+        found.push(child);
+      }
+      walk(child.id);
+    }
+  };
+  walk(goalId);
+  return found;
+}
+
+/** Null or an empty day list means the step can show on any day. */
+function cardPlannedOn(step: Goal, date: string, weekStartsOn: WeekStart): boolean {
+  const weekStart = startOfWeek(date, weekStartsOn);
+  const days = targetFor(step, weekStart, endOfWeek(weekStart, weekStartsOn)).plannedDays;
+  if (days == null || days.length === 0) {
+    return true;
+  }
+  return days.includes(parseLocalDate(date).getDay());
 }
 
 function firstOpenStep(
@@ -91,7 +108,6 @@ export function mayaDailyLine(input: {
   weekStartsOn: WeekStart;
   nodes: Goal[];
   entries: GoalEntry[];
-  mayaGoalIds: ReadonlySet<string>;
 }): MayaDailyLine | null {
   if (input.level === 'self' || input.dismissedOn === input.today) {
     return null;
@@ -99,29 +115,27 @@ export function mayaDailyLine(input: {
   const childrenMap = buildChildrenMap(input.nodes);
   const greeting = timeGreeting(input.hour);
   for (const goal of rootsInPlanOrder(input.nodes)) {
-    if (!input.mayaGoalIds.has(goal.id)) {
-      continue;
+    for (const habit of repeatingUnder(goal.id, childrenMap)) {
+      if (!cardPlannedOn(habit, input.today, input.weekStartsOn)) {
+        continue;
+      }
+      if (isDoneForDay(habit, input.entries, input.today, input.nodes, input.weekStartsOn)) {
+        continue;
+      }
+      const matches =
+        input.level === 'lots' ||
+        habitBehind(habit, input.nodes, input.entries, input.today, input.weekStartsOn);
+      if (!matches) {
+        continue;
+      }
+      const step = firstOpenStep(goal.id, childrenMap);
+      const habitName = habit.title.trim() || 'This';
+      const text =
+        input.level === 'lots'
+          ? lotsDailyLine(greeting, input.name, habitName, step?.title.trim() || null)
+          : occasionalDailyLine(goal.title, habitName);
+      return { goalId: goal.id, habitId: habit.id, text };
     }
-    const habit = starterHabit(goal.id, childrenMap);
-    if (!habit) {
-      continue;
-    }
-    const loggedToday = dayCount(input.entries, habit.id, input.today) > 0;
-    const matches =
-      input.level === 'lots'
-        ? habitPlannedOn(habit, input.today, input.weekStartsOn) && !loggedToday
-        : habitBehind(habit, input.nodes, input.entries, input.today, input.weekStartsOn) &&
-          !loggedToday;
-    if (!matches) {
-      continue;
-    }
-    const step = firstOpenStep(goal.id, childrenMap);
-    const habitName = habit.title.trim() || 'This';
-    const text =
-      input.level === 'lots'
-        ? lotsDailyLine(greeting, input.name, habitName, step?.title.trim() || null)
-        : occasionalDailyLine(goal.title, habitName);
-    return { goalId: goal.id, habitId: habit.id, text };
   }
   return null;
 }

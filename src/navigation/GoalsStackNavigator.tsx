@@ -1,5 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import BlockedMembersScreen from '../screens/BlockedMembersScreen';
 import ChatScreen from '../screens/ChatScreen';
+import CommunityGuidelinesScreen from '../screens/CommunityGuidelinesScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import MayaFlowScreen from '../screens/MayaFlowScreen';
 import GoalScreen from '../screens/GoalScreen';
@@ -42,6 +44,8 @@ export type GoalsStackParamList = {
   Goal: GoalRouteParams;
   Chat: ChatParams;
   Profile: undefined;
+  CommunityGuidelines: undefined;
+  BlockedMembers: undefined;
   DeleteAccount: undefined;
   HowItWorks: undefined;
   Learn: { tab?: LearnTab } | undefined;
@@ -102,6 +106,16 @@ export default function GoalsStackNavigator() {
           headerTitleAlign: 'center',
           headerBackTitle: 'Plan',
         }}
+      />
+      <Stack.Screen
+        name="CommunityGuidelines"
+        component={CommunityGuidelinesScreen}
+        options={{ title: 'Community guidelines', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="BlockedMembers"
+        component={BlockedMembersScreen}
+        options={{ title: 'Blocked members', headerTitleAlign: 'center' }}
       />
       <Stack.Screen
         name="DeleteAccount"

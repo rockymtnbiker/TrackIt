@@ -33,21 +33,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let listenerRan = false;
 
+    const { data: subscription } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => {
+        listenerRan = true;
+        if (!mounted) {
+          return;
+        }
+        setSession(nextSession);
+        setLoading(false);
+      },
+    );
+
+    // Once the auth listener has run, ignore a late getSession() result.
     supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) {
+      if (!mounted || listenerRan) {
         return;
       }
       setSession(data.session);
       setLoading(false);
     });
-
-    const { data: subscription } = supabase.auth.onAuthStateChange(
-      (_event, nextSession) => {
-        setSession(nextSession);
-        setLoading(false);
-      },
-    );
 
     return () => {
       mounted = false;

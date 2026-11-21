@@ -246,11 +246,13 @@ export function GroupGoalsPanel({
   groupName,
   admin,
   showMemberProgress,
+  blockedIds = [],
 }: {
   groupId: string;
   groupName: string;
   admin: boolean;
   showMemberProgress: boolean;
+  blockedIds?: string[];
 }) {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useFloatingTabBarHeight();
@@ -472,7 +474,9 @@ export function GroupGoalsPanel({
           ) : null}
           {expanded ? (
             <View style={styles.members}>
-              {members.map((member) => (
+              {members
+                .filter((member) => !blockedIds.includes(member.userId))
+                .map((member) => (
                 <View key={member.userId} style={styles.memberRow}>
                   <Text style={styles.memberName}>{memberLabel(member, user?.id)}</Text>
                   <Text style={styles.memberScore}>

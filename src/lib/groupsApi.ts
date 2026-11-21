@@ -11,6 +11,7 @@ export type MyGroup = {
   id: string;
   name: string;
   memberCount: number;
+  unreadCount: number;
 };
 
 export type GroupRole = 'admin' | 'member';
@@ -21,6 +22,7 @@ export type GroupDetail = {
   description: string | null;
   everyoneAdmin: boolean;
   showMemberProgress: boolean;
+  chatAdminsOnly: boolean;
   inviteCode: string | null;
   role: GroupRole;
   memberCount: number;
@@ -130,7 +132,12 @@ export async function listMyGroups(): Promise<MyGroup[]> {
     if (!row || typeof row.id !== 'string' || typeof row.name !== 'string') {
       continue;
     }
-    groups.push({ id: row.id, name: row.name, memberCount: asCount(row.member_count) });
+    groups.push({
+      id: row.id,
+      name: row.name,
+      memberCount: asCount(row.member_count),
+      unreadCount: asCount(row.unread_count),
+    });
   }
   return groups;
 }
@@ -150,6 +157,7 @@ export async function getGroup(groupId: string): Promise<GroupDetail> {
     description: typeof row.description === 'string' ? row.description : null,
     everyoneAdmin: row.everyone_admin === true,
     showMemberProgress: row.show_member_progress === true,
+    chatAdminsOnly: row.chat_admins_only === true,
     inviteCode: typeof row.invite_code === 'string' ? row.invite_code : null,
     role: asRole(row.role),
     memberCount: asCount(row.member_count),
@@ -353,6 +361,16 @@ export async function getGroupProgress(groupId: string, weekStart: string): Prom
     activeMembers: asCount(row?.active_members),
     goals,
   };
+}
+
+export async function setChatAdminsOnly(groupId: string, on: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_chat_admins_only', {
+    p_group_id: groupId,
+    p_on: on,
+  });
+  if (error) {
+    throw error;
+  }
 }
 
 export async function setShowMemberProgress(groupId: string, on: boolean): Promise<void> {

@@ -15,7 +15,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { blockMember, listBlockedMembers } from '../lib/blocksApi';
 import { ChooseGoalsSheet, MemberSharedGoals } from '../components/GroupGoalShare';
+import { GroupChatPanel } from '../components/GroupChatPanel';
 import { GroupGoalsPanel } from '../components/GroupGoalsPanel';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import {
@@ -30,6 +32,7 @@ import {
   removeMember,
   renameGroup,
   resetInviteCode,
+  setChatAdminsOnly,
   setEveryoneAdmin,
   setShowMemberProgress,
   setMemberRole,
@@ -61,11 +64,13 @@ export default function GroupScreen({ navigation, route }: Props) {
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [shares, setShares] = useState<GroupGoalShare[]>([]);
+  const [blockedIds, setBlockedIds] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [chooseOpen, setChooseOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('members');
+  const [chatUnread, setChatUnread] = useState(0);
   const [gear, setGear] = useState<Gear>(null);
   const [rename, setRename] = useState('');
   const [deleteText, setDeleteText] = useState('');
@@ -77,14 +82,16 @@ export default function GroupScreen({ navigation, route }: Props) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [nextGroup, nextMembers, nextShares] = await Promise.all([
+      const [nextGroup, nextMembers, nextShares, nextBlocked] = await Promise.all([
         getGroup(groupId),
         listGroupMembers(groupId),
         listGroupGoalShares(groupId),
+        listBlockedMembers(),
       ]);
       setGroup(nextGroup);
       setMembers(nextMembers);
       setShares(nextShares);
+      setBlockedIds(nextBlocked.map((member) => member.userId));
       setCode(nextGroup.inviteCode);
     } catch (cause) {
       setError(groupErrorMessage(cause, 'Could not load this group.'));
@@ -165,12 +172,16 @@ export default function GroupScreen({ navigation, route }: Props) {
   };
 
   const shareCounts = useMemo(() => {
+    const blocked = new Set(blockedIds);
     const counts = new Map<string, number>();
     for (const share of shares) {
+      if (blocked.has(share.ownerId)) {
+        continue;
+      }
       counts.set(share.ownerId, (counts.get(share.ownerId) ?? 0) + 1);
     }
     return counts;
-  }, [shares]);
+  }, [blockedIds, shares]);
 
   const orderedMembers = useMemo(() => {
     const mine = members.filter((member) => member.userId === user?.id);
@@ -198,6 +209,18 @@ export default function GroupScreen({ navigation, route }: Props) {
     } catch (cause) {
       fail(cause);
     }
+  };
+
+  const blockFromMembers = (member: GroupMember) => {
+    setSelected(null);
+    void (async () => {
+      try {
+        await blockMember(member.userId);
+        setBlockedIds((current) => (current.includes(member.userId) ? current : [...current, member.userId]));
+      } catch (cause) {
+        fail(cause);
+      }
+    })();
   };
 
   const confirmRemove = (member: GroupMember) => {
@@ -233,6 +256,22 @@ export default function GroupScreen({ navigation, route }: Props) {
       setGear(null);
     } catch (cause) {
       setGearError(groupErrorMessage(cause, 'Could not rename the group.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleAdminsOnly = async (on: boolean) => {
+    if (!group || busy) {
+      return;
+    }
+    setBusy(true);
+    setGearError(null);
+    try {
+      await setChatAdminsOnly(groupId, on);
+      await load();
+    } catch (cause) {
+      setGearError(groupErrorMessage(cause, 'Could not update the group.'));
     } finally {
       setBusy(false);
     }
@@ -314,9 +353,18 @@ export default function GroupScreen({ navigation, route }: Props) {
               style={styles.tab}
               accessibilityRole="tab"
               accessibilityState={{ selected: selectedTab }}
-              accessibilityLabel={item.label}
+              accessibilityLabel={
+                item.id === 'chat' && chatUnread > 0 ? `Chat, ${chatUnread} unread` : item.label
+              }
             >
-              <Text style={[styles.tabText, selectedTab && styles.tabTextOn]}>{item.label}</Text>
+              <View style={styles.tabLabel}>
+                <Text style={[styles.tabText, selectedTab && styles.tabTextOn]}>{item.label}</Text>
+                {item.id === 'chat' && chatUnread > 0 ? (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>{chatUnread > 99 ? '99+' : String(chatUnread)}</Text>
+                  </View>
+                ) : null}
+              </View>
               <View style={[styles.tabLine, selectedTab && styles.tabLineOn]} />
             </Pressable>
           );
@@ -332,7 +380,7 @@ export default function GroupScreen({ navigation, route }: Props) {
           </Pressable>
         </View>
       ) : tab === 'members' ? (
-        <ScrollView contentContainerStyle={{ paddingBottom: 32 + tabBarHeight }}>
+        <ScrollView style={styles.membersScroll} contentContainerStyle={{ paddingBottom: 32 + tabBarHeight }}>
           <View style={styles.card}>
             {orderedMembers.map((member, index) => {
               const mine = member.userId === user?.id;
@@ -359,7 +407,7 @@ export default function GroupScreen({ navigation, route }: Props) {
                         </View>
                         <Text style={styles.sharedCount}>{count} shared goals</Text>
                       </Pressable>
-                      {group?.role === 'admin' && !mine ? (
+                      {!mine && (group?.role === 'admin' || !blockedIds.includes(member.userId)) ? (
                         <Pressable
                           onPress={() => setSelected(member)}
                           hitSlop={8}
@@ -383,7 +431,7 @@ export default function GroupScreen({ navigation, route }: Props) {
                       </Pressable>
                     ) : null}
                   </View>
-                  {open ? (
+                  {open && !blockedIds.includes(member.userId) ? (
                     <MemberSharedGoals
                       key={`${member.userId}-${count}`}
                       groupId={groupId}
@@ -421,12 +469,24 @@ export default function GroupScreen({ navigation, route }: Props) {
           groupName={group?.name ?? ''}
           admin={group?.role === 'admin'}
           showMemberProgress={group?.showMemberProgress === true}
+          blockedIds={blockedIds}
         />
-      ) : (
-        <View style={styles.soon}>
-          <Text style={styles.soonText}>Coming soon</Text>
-        </View>
-      )}
+      ) : null}
+      <View style={tab === 'chat' ? styles.chatHost : styles.chatHidden}>
+        <GroupChatPanel
+          groupId={groupId}
+          members={members}
+          active={tab === 'chat'}
+          tabBarHeight={tabBarHeight}
+          onUnreadCount={setChatUnread}
+          chatAdminsOnly={group?.chatAdminsOnly === true}
+          viewerIsAdmin={group?.role === 'admin'}
+          blockedIds={blockedIds}
+          onBlocked={(userId) =>
+            setBlockedIds((current) => (current.includes(userId) ? current : [...current, userId]))
+          }
+        />
+      </View>
 
       <Modal visible={gear != null} transparent animationType="slide" onRequestClose={() => setGear(null)}>
         <KeyboardSafe style={styles.overlay} keyboardVerticalOffset={0}>
@@ -477,6 +537,15 @@ export default function GroupScreen({ navigation, route }: Props) {
                     onValueChange={(on) => void toggleMemberProgress(on)}
                     disabled={busy}
                     accessibilityLabel="Show each member's progress"
+                  />
+                </View>
+                <View style={styles.sheetRow}>
+                  <Text style={styles.sheetLabel}>Only admins can post</Text>
+                  <Switch
+                    value={group?.chatAdminsOnly === true}
+                    onValueChange={(on) => void toggleAdminsOnly(on)}
+                    disabled={busy}
+                    accessibilityLabel="Only admins can post"
                   />
                 </View>
                 <Pressable
@@ -590,33 +659,47 @@ export default function GroupScreen({ navigation, route }: Props) {
             {selected ? (
               <>
                 <Text style={styles.sheetTitle}>{selected.displayName}</Text>
-                {selected.role === 'member' ? (
+                {group?.role === 'admin' ? (
+                  <>
+                    {selected.role === 'member' ? (
+                      <Pressable
+                        onPress={() => void changeRole(selected, 'admin')}
+                        style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Make admin"
+                      >
+                        <Text style={styles.sheetLabel}>Make admin</Text>
+                      </Pressable>
+                    ) : group.everyoneAdmin ? null : (
+                      <Pressable
+                        onPress={() => void changeRole(selected, 'member')}
+                        style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel="Remove admin"
+                      >
+                        <Text style={styles.sheetLabel}>Remove admin</Text>
+                      </Pressable>
+                    )}
+                    <Pressable
+                      onPress={() => confirmRemove(selected)}
+                      style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove from group"
+                    >
+                      <Text style={styles.destructive}>Remove from group</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+                {!blockedIds.includes(selected.userId) ? (
                   <Pressable
-                    onPress={() => void changeRole(selected, 'admin')}
+                    onPress={() => blockFromMembers(selected)}
                     style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
                     accessibilityRole="button"
-                    accessibilityLabel="Make admin"
+                    accessibilityLabel={`Block ${selected.displayName}`}
                   >
-                    <Text style={styles.sheetLabel}>Make admin</Text>
+                    <Text style={styles.sheetLabel}>Block {selected.displayName}</Text>
                   </Pressable>
-                ) : group?.everyoneAdmin ? null : (
-                  <Pressable
-                    onPress={() => void changeRole(selected, 'member')}
-                    style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Remove admin"
-                  >
-                    <Text style={styles.sheetLabel}>Remove admin</Text>
-                  </Pressable>
-                )}
-                <Pressable
-                  onPress={() => confirmRemove(selected)}
-                  style={({ pressed }) => [styles.sheetRow, pressed && styles.pressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Remove from group"
-                >
-                  <Text style={styles.destructive}>Remove from group</Text>
-                </Pressable>
+                ) : null}
               </>
             ) : null}
           </Pressable>
@@ -641,6 +724,34 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingTop: 12,
+  },
+  tabLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  unreadBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 5,
+    backgroundColor: '#007aff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  chatHost: {
+    flex: 1,
+  },
+  chatHidden: {
+    display: 'none',
+  },
+  membersScroll: {
+    flex: 1,
   },
   tabText: {
     fontSize: 15,

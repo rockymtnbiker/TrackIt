@@ -2,7 +2,7 @@ import { BlurView } from 'expo-blur';
 import { CommonActions } from '@react-navigation/native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Keyboard, Platform, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
+import { Dimensions, Keyboard, Platform, Pressable, StyleSheet, Text, useColorScheme, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -51,10 +51,20 @@ export function FloatingTabBar({ state, navigation, descriptors, progress }: Pro
   const tabWidth = useSharedValue(0);
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const show = Keyboard.addListener(showEvent, () => setKeyboardOpen(true));
-    const hide = Keyboard.addListener(hideEvent, () => setKeyboardOpen(false));
+    const covered = (event: { endCoordinates: { screenY: number } }) =>
+      Math.max(0, Dimensions.get('screen').height - event.endCoordinates.screenY) > 0;
+    if (Platform.OS === 'ios') {
+      const change = Keyboard.addListener('keyboardWillChangeFrame', (event) => {
+        setKeyboardOpen(covered(event));
+      });
+      const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
+      return () => {
+        change.remove();
+        hide.remove();
+      };
+    }
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
     return () => {
       show.remove();
       hide.remove();

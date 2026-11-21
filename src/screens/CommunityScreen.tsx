@@ -669,12 +669,15 @@ export default function CommunityScreen({ navigation, route }: Props) {
                   onPress={() => navigation.navigate('Group', { groupId: group.id })}
                   style={({ pressed }) => [styles.row, pressed && styles.pressed]}
                   accessibilityRole="button"
-                  accessibilityLabel={`${group.name}, ${group.memberCount} members`}
+                  accessibilityLabel={`${group.name}, ${group.memberCount} members${group.unreadCount > 0 ? ', unread' : ''}`}
                 >
                   <View style={styles.actionText}>
                     <Text style={styles.rowLabel}>{group.name}</Text>
                     <Text style={styles.actionBody}>{group.memberCount} members</Text>
                   </View>
+                  {group.unreadCount > 0 ? (
+                    <View style={styles.unreadDot} accessibilityLabel="Unread" />
+                  ) : null}
                   <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
                 </Pressable>
               </View>

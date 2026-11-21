@@ -6,6 +6,7 @@ import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -17,6 +18,7 @@ import {
 } from 'react-native';
 import { FeedbackSheet } from '../components/FeedbackSheet';
 import { TimePickerModal } from '../components/TimePickerModal';
+import { SUPPORT_EMAIL } from '../constants/communitySafety';
 import { MAYA_CHECKIN_OPTIONS, MAYA_DAILY } from '../constants/maya/daily';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
@@ -24,7 +26,15 @@ import { clockFromDate, dateAtClock } from '../lib/clock';
 import { getAllGoals } from '../lib/goalTreeApi';
 import { WEEKDAY_NAMES } from '../lib/goalDetailText';
 import { calendarDayLabels } from '../lib/week';
-import { getDisplayName, saveDisplayName } from '../lib/profileApi';
+import {
+  getDisplayName,
+  getStoredAgeRange,
+  saveAgeRange,
+  saveDisplayName,
+  settingsAgeFromStored,
+  type AgeRange,
+  type SettingsAgeChoice,
+} from '../lib/profileApi';
 import { resetTips } from '../lib/tips';
 import {
   DEFAULT_CHECKIN,
@@ -38,7 +48,7 @@ import { formatTime } from '../utils/formatTime';
 type Props = {
   navigation: {
     navigate: (
-      screen: 'DeleteAccount' | 'Goal' | 'HowItWorks' | 'Learn',
+      screen: 'DeleteAccount' | 'Goal' | 'HowItWorks' | 'Learn' | 'CommunityGuidelines' | 'BlockedMembers',
       params?: { goalId: string; editReminder?: boolean },
     ) => void;
   };
@@ -56,16 +66,28 @@ const REMINDER_OPTIONS: { value: ReminderMode; label: string }[] = [
 
 const APP_VERSION = Constants.expoConfig?.version ?? '';
 
+const AGE_OPTIONS: { value: SettingsAgeChoice; label: string }[] = [
+  { value: 'under_13', label: 'Under 13' },
+  { value: 'under_18', label: '13–17' },
+  { value: '18_24', label: '18–24' },
+  { value: '25_34', label: '25–34' },
+  { value: '35_49', label: '35–49' },
+  { value: '50_plus', label: '50+' },
+  { value: 'prefer_not', label: 'Prefer not to say' },
+];
+
 function ChoiceRow<T extends string | number>({
   label,
   value,
   options,
   onChange,
+  allowReselect = false,
 }: {
   label: string;
   value: T;
   options: { value: T; label: string }[];
   onChange: (value: T) => void;
+  allowReselect?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const selected = options.find((option) => option.value === value)?.label ?? '—';
@@ -93,7 +115,7 @@ function ChoiceRow<T extends string | number>({
                 key={String(option.value)}
                 onPress={() => {
                   setOpen(false);
-                  if (option.value !== value) {
+                  if (allowReselect || option.value !== value) {
                     onChange(option.value);
                   }
                 }}
@@ -145,6 +167,7 @@ export default function ProfileScreen({ navigation }: Props) {
   const [checkinPicker, setCheckinPicker] = useState(false);
   const [reflectionPicker, setReflectionPicker] = useState(false);
   const [reminderGoals, setReminderGoals] = useState<Goal[] | null>(null);
+  const [ageChoice, setAgeChoice] = useState<SettingsAgeChoice | ''>('');
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +191,29 @@ export default function ProfileScreen({ navigation }: Props) {
       cancelled = true;
     };
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void getStoredAgeRange()
+        .then((stored) => {
+          if (!cancelled) {
+            setAgeChoice(settingsAgeFromStored(stored) ?? '');
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            Alert.alert(
+              'Could not load your age range',
+              errorMessage(error, 'Age range was not loaded.'),
+            );
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -218,6 +264,20 @@ export default function ProfileScreen({ navigation }: Props) {
       Alert.alert('Could not save', errorMessage(error, 'Display name was not saved.'));
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const chooseAge = async (choice: SettingsAgeChoice) => {
+    if (choice === 'under_13') {
+      Alert.alert('TrackIt is for people 13 and older.');
+      return;
+    }
+    const next = choice as AgeRange;
+    try {
+      await saveAgeRange(next);
+      setAgeChoice(next);
+    } catch (error) {
+      Alert.alert('Could not save your age range', errorMessage(error, 'Age range was not saved.'));
     }
   };
 
@@ -358,6 +418,18 @@ export default function ProfileScreen({ navigation }: Props) {
       <Text style={styles.section}>Settings</Text>
       <View style={styles.card}>
         <ChoiceRow
+          label="Age range"
+          value={ageChoice}
+          options={AGE_OPTIONS}
+          allowReselect
+          onChange={(choice) => {
+            if (choice) {
+              void chooseAge(choice);
+            }
+          }}
+        />
+        <View style={styles.separator} />
+        <ChoiceRow
           label="Week starts on"
           value={settings.weekStart}
           options={WEEK_OPTIONS}
@@ -487,6 +559,41 @@ export default function ProfileScreen({ navigation }: Props) {
             ) : null}
           </>
         )}
+      </View>
+
+      <Text style={styles.section}>Community</Text>
+      <View style={styles.card}>
+        <Pressable
+          onPress={() => navigation.navigate('CommunityGuidelines')}
+          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Community guidelines"
+        >
+          <Text style={styles.rowLabel}>Community guidelines</Text>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+        </Pressable>
+        <View style={styles.separator} />
+        <Pressable
+          onPress={() => {
+            void Linking.openURL(`mailto:${SUPPORT_EMAIL}`);
+          }}
+          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Contact us"
+        >
+          <Text style={styles.rowLabel}>Contact us</Text>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+        </Pressable>
+        <View style={styles.separator} />
+        <Pressable
+          onPress={() => navigation.navigate('BlockedMembers')}
+          style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Blocked members"
+        >
+          <Text style={styles.rowLabel}>Blocked members</Text>
+          <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+        </Pressable>
       </View>
 
       <Text style={styles.section}>Help</Text>

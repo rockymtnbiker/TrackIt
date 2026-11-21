@@ -1,6 +1,8 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import BlockedMembersScreen from '../screens/BlockedMembersScreen';
 import BlockedScreen from '../screens/BlockedScreen';
 import ChatScreen from '../screens/ChatScreen';
+import CommunityGuidelinesScreen from '../screens/CommunityGuidelinesScreen';
 import CommunityScreen from '../screens/CommunityScreen';
 import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import LearnArticleScreen from '../screens/LearnArticleScreen';
@@ -31,6 +33,8 @@ export type CommunityStackParamList = {
   Blocked: undefined;
   Goal: GoalRouteParams;
   Profile: undefined;
+  CommunityGuidelines: undefined;
+  BlockedMembers: undefined;
   DeleteAccount: undefined;
   HowItWorks: undefined;
   Group: { groupId: string };
@@ -103,6 +107,16 @@ export default function CommunityStackNavigator() {
           headerTitleAlign: 'center',
           headerBackTitle: 'Connect',
         }}
+      />
+      <Stack.Screen
+        name="CommunityGuidelines"
+        component={CommunityGuidelinesScreen}
+        options={{ title: 'Community guidelines', headerTitleAlign: 'center' }}
+      />
+      <Stack.Screen
+        name="BlockedMembers"
+        component={BlockedMembersScreen}
+        options={{ title: 'Blocked members', headerTitleAlign: 'center' }}
       />
       <Stack.Screen
         name="DeleteAccount"

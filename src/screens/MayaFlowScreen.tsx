@@ -79,7 +79,16 @@ import {
   type ShapeDraft,
   type ShapeStepId,
 } from '../lib/mayaShape';
-import { ageRangeFromChoice, getAgeRange, getDisplayName, markOnboarded, saveAgeRange } from '../lib/profileApi';
+import {
+  ageRangeFromChoice,
+  getAgeRange,
+  getDisplayName,
+  getTemperature,
+  markOnboarded,
+  saveAgeRange,
+  saveTemperature,
+  type TemperatureId,
+} from '../lib/profileApi';
 import type { MayaLevel } from '../lib/settingsApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
 import { finishOnboarding } from '../navigation/onboardingHandoff';
@@ -114,6 +123,10 @@ function saveError(error: unknown): string {
   return 'Something went wrong. Try again.';
 }
 
+function isTemperature(value: string | string[] | number | null): value is TemperatureId {
+  return value === 'level-up' || value === 'handling' || value === 'stretched' || value === 'stuck';
+}
+
 function temperatureLine(answers: MayaAnswers): string | null {
   if (answers.temp === 'stretched') {
     return SHAPE_COPY.tempStretched;
@@ -140,6 +153,8 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const lastSavedId = useRef<string | null>(null);
   const fromOnboarding = (navigation.getState().routeNames as string[]).includes('FirstGoal');
   const ageKnownRef = useRef(false);
+  const tempKnownRef = useRef(false);
+  const tempValueRef = useRef<string | null>(null);
   const askLevelRef = useRef(true);
   const levelAskedRef = useRef(false);
   const [name, setName] = useState('');
@@ -183,14 +198,17 @@ export default function MayaFlowScreen({ navigation }: Props) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [age, asked] = await Promise.all([
+      const [age, temperature, asked] = await Promise.all([
         getAgeRange().catch(() => null),
+        getTemperature().catch(() => null),
         user?.id ? getMayaLevelAsked(user.id).catch(() => false) : Promise.resolve(false),
       ]);
       if (cancelled) {
         return;
       }
       ageKnownRef.current = age != null;
+      tempKnownRef.current = temperature != null;
+      tempValueRef.current = temperature;
       levelAskedRef.current = asked;
       askLevelRef.current = !asked;
       setProfileReady(true);
@@ -227,6 +245,8 @@ export default function MayaFlowScreen({ navigation }: Props) {
   const walkOptions = useCallback((): WalkOptions => {
     return {
       ageKnown: ageKnownRef.current,
+      tempKnown: tempKnownRef.current,
+      temp: tempValueRef.current,
       askLevel: askLevelRef.current,
       level: settings.mayaLevel,
     };
@@ -248,17 +268,14 @@ export default function MayaFlowScreen({ navigation }: Props) {
     );
   }, [navigation]);
 
-  const openSavedGoal = useCallback(
-    (startEditing = false) => {
-      const goalId = savedGoalId.current ?? lastSavedId.current;
-      if (!goalId) {
-        navigation.goBack();
-        return;
-      }
-      navigation.replace('Goal', startEditing ? { goalId, startEditing: true } : { goalId });
-    },
-    [navigation],
-  );
+  const openSavedGoal = useCallback(() => {
+    const goalId = savedGoalId.current ?? lastSavedId.current;
+    if (!goalId) {
+      navigation.goBack();
+      return;
+    }
+    navigation.replace('Goal', { goalId });
+  }, [navigation]);
 
   const goToToday = useCallback(() => {
     const tab = navigation.getParent();
@@ -356,10 +373,18 @@ export default function MayaFlowScreen({ navigation }: Props) {
           node.options?.find((option) => option.id === value)?.label ?? '',
         );
         if (stored) {
+          ageKnownRef.current = true;
           void saveAgeRange(stored).catch((error: unknown) => {
             Alert.alert('Could not save your age range', saveError(error));
           });
         }
+      }
+      if (node.id === 'temp' && isTemperature(value)) {
+        tempKnownRef.current = true;
+        tempValueRef.current = value;
+        void saveTemperature(value).catch((error: unknown) => {
+          Alert.alert('Could not save how you have been feeling', saveError(error));
+        });
       }
       commitWalk(continueWalk({ ...walkRef.current, answers }, walkOptions()));
     },
@@ -413,14 +438,14 @@ export default function MayaFlowScreen({ navigation }: Props) {
   );
 
   const finishSavedJob = useCallback(
-    (goalId: string, startEditing: boolean) => {
+    (goalId: string) => {
       savedGoalId.current = goalId;
       lastSavedId.current = goalId;
       if (fromOnboarding) {
         finishOnboarding(goalId);
         return;
       }
-      openSavedGoal(startEditing);
+      openSavedGoal();
     },
     [fromOnboarding, openSavedGoal],
   );
@@ -460,7 +485,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
             if (!levelAskedRef.current) {
               await updateSettings({ mayaLevel: 'occasional' });
             }
-            finishSavedJob(goalId, true);
+            finishSavedJob(goalId);
           } catch (error) {
             Alert.alert('Could not save your goal', saveError(error));
           } finally {
@@ -594,7 +619,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
             }
           }
           if (fromOnboarding) {
-            finishSavedJob(goalId, true);
+            finishSavedJob(goalId);
             return;
           }
           goToToday();
@@ -853,7 +878,7 @@ export default function MayaFlowScreen({ navigation }: Props) {
                       finishOnboarding(goalId);
                       return;
                     }
-                    openSavedGoal(false);
+                    openSavedGoal();
                   }}
                 />
               )}

@@ -27,11 +27,14 @@ export function MayaCoachCard({
   onDraft,
   onNext,
   beforeNext,
+  actionLabel = 'Next',
 }: {
   draft: ShapeDraft;
   onDraft: (next: ShapeDraft) => void;
   onNext: () => void;
   beforeNext?: ReactNode;
+  /** Job setup says Next. The reflect hand-off says Confirm. */
+  actionLabel?: string;
 }) {
   const poke = useKeyboardPoke();
   const [editingId, setEditingId] = useState<string | null>(() => {
@@ -131,9 +134,9 @@ export function MayaCoachCard({
         onPress={onNext}
         style={({ pressed }) => [styles.choice, pressed && styles.pressed]}
         accessibilityRole="button"
-        accessibilityLabel="Next"
+        accessibilityLabel={actionLabel}
       >
-        <Text style={styles.choiceText}>Next</Text>
+        <Text style={styles.choiceText}>{actionLabel}</Text>
       </Pressable>
     </KeyboardAnswer>
   );

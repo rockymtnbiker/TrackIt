@@ -6,7 +6,7 @@ import DeleteAccountScreen from '../screens/DeleteAccountScreen';
 import LearnArticleScreen from '../screens/LearnArticleScreen';
 import LearnScreen from '../screens/LearnScreen';
 import GoalScreen from '../screens/GoalScreen';
-import GroupsInterestScreen from '../screens/GroupsInterestScreen';
+import GroupScreen from '../screens/GroupScreen';
 import PartnerScreen from '../screens/PartnerScreen';
 import MayaFlowScreen from '../screens/MayaFlowScreen';
 import MayaHomeScreen from '../screens/MayaHomeScreen';
@@ -33,7 +33,7 @@ export type CommunityStackParamList = {
   Profile: undefined;
   DeleteAccount: undefined;
   HowItWorks: undefined;
-  GroupsInterest: undefined;
+  Group: { groupId: string };
 };
 
 const Stack = createNativeStackNavigator<CommunityStackParamList>();
@@ -68,10 +68,10 @@ export default function CommunityStackNavigator() {
         }}
       />
       <Stack.Screen
-        name="GroupsInterest"
-        component={GroupsInterestScreen}
+        name="Group"
+        component={GroupScreen}
         options={{
-          title: 'Groups',
+          title: '',
           headerTitleAlign: 'center',
           headerBackTitle: 'Connect',
         }}

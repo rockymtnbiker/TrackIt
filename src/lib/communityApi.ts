@@ -129,6 +129,9 @@ function mapGoal(row: GoalRow): Goal {
     reminderTime: null,
     starterKey: null,
     progressPct: mapProgressPct(row.progress_pct),
+    groupGoalId: null,
+    groupLink: null,
+    connectedAt: null,
   };
 }
 

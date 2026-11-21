@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { STATUS_COLORS } from '../constants';
 import { useSettings } from '../context/SettingsContext';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import { periodTotalAsOf } from '../lib/asOfDate';
 import {
   getGoalsSharedWithMe,
@@ -157,6 +158,7 @@ export function PartnerGoalsView({
   mode = 'all',
   onOpenGoal,
 }: Props) {
+  const tabBarHeight = useFloatingTabBarHeight();
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const [sharedGoals, setSharedGoals] = useState<Goal[]>([]);
@@ -290,7 +292,7 @@ export function PartnerGoalsView({
     <View style={styles.screen}>
       <ScrollView
         style={styles.screen}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: 32 + tabBarHeight }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

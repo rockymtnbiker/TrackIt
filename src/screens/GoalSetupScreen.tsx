@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { DatePickerModal } from '../components/DatePickerModal';
 import { FormSelectRow, formFieldStyles } from '../components/FormFields';
@@ -190,6 +191,9 @@ function probe(
     reminderTime: null,
     starterKey: null,
     progressPct: null,
+    groupGoalId: null,
+    groupLink: null,
+    connectedAt: null,
     ...fields,
   };
 }
@@ -270,6 +274,7 @@ function targetLabel(cadence: Cadence): string {
 
 export default function GoalSetupScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useFloatingTabBarHeight();
   const { settings } = useSettings();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [areaKey, setAreaKey] = useState<string | null>(null);
@@ -375,7 +380,10 @@ export default function GoalSetupScreen({ navigation }: Props) {
   return (
     <KeyboardSafe style={styles.safe}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: 24 + (step === 3 ? 0 : tabBarHeight) },
+        ]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
       >
@@ -624,7 +632,7 @@ export default function GoalSetupScreen({ navigation }: Props) {
       </ScrollView>
 
       {step === 3 ? (
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) + tabBarHeight }]}>
           {createError ? <Text style={styles.error}>{createError}</Text> : null}
           <Pressable
             onPress={() => void create()}

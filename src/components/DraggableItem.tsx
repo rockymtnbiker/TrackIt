@@ -1,7 +1,8 @@
-import { createContext, useContext, useMemo, useRef, type ReactNode, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import Animated, {
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -62,6 +63,12 @@ export function DraggableItem({
 
   const translateY = useSharedValue(0);
   const lifted = useSharedValue(0);
+  useEffect(() => {
+    return () => {
+      cancelAnimation(translateY);
+      cancelAnimation(lifted);
+    };
+  }, [lifted, translateY]);
   const outerDrag = useContext(OuterDragContext);
   const panRef = useRef<GestureType | undefined>(undefined);
   const tapRef = useRef<GestureType | undefined>(undefined);

@@ -254,6 +254,9 @@ function textAnswer(answers: MayaAnswers, nodeId: string): string {
 }
 
 function stringList(value: MayaAnswers[string] | undefined): string[] {
+  if (typeof value === 'string' && value) {
+    return [value];
+  }
   return Array.isArray(value) ? value : [];
 }
 

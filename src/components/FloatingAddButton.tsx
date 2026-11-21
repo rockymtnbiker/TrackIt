@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
-import { useContext } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 
 export const FLOATING_ADD_BUTTON_SIZE = 56;
 /** List padding so the last row clears the button. */
@@ -16,10 +15,7 @@ export function FloatingAddButton({
   onPress,
   accessibilityLabel = 'Add goal',
 }: Props) {
-  const tabBarHeight = useContext(BottomTabBarHeightContext);
-  // These screens sit in the tab scene, which already ends at the in-flow bar.
-  // A bottom-tab navigator reports its height because the scene draws under it.
-  const bottom = 16 + (tabBarHeight ?? 0);
+  const bottom = 16 + useFloatingTabBarHeight();
 
   return (
     <Pressable

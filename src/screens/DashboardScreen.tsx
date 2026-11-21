@@ -1,17 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BadgeGrid } from '../components/BadgeGrid';
 import { PageHeader } from '../components/PageHeader';
+import { ReflectHubCard, ReflectPill } from '../components/ReflectMayaCard';
+import { ReflectMayaBar } from '../components/ReflectMayaBar';
+import { GoalSetupChoiceSheet } from '../components/GoalSetupChoiceSheet';
+import {
+  ReflectWrapCard,
+  type ReflectPartner,
+  type ReflectWrapStep,
+  type ReflectWrapTurn,
+} from '../components/ReflectWrapCard';
 import { useFocusEffect, type NavigationProp } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  type ScrollViewInstance,
 } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { useSettings } from '../context/SettingsContext';
@@ -20,8 +32,7 @@ import { toneForStatusText, getWeekProgressMessage } from '../lib/statusMessages
 import type { WeekStart } from '../lib/settingsApi';
 import {
   endOfWeek,
-  isReflectionWindow,
-  reflectionTargetWeek,
+  lastFullWeek,
   startOfWeek,
   weekDays,
   weekdayLabels,
@@ -53,8 +64,27 @@ import {
   type WeeklyReview,
 } from '../lib/weeklyReview';
 import { getAllGoals, getEntries } from '../lib/goalTreeApi';
+import { REFLECT_FLOW } from '../constants/maya/reflectFlow';
 import { REFLECTION_COPY } from '../constants/reflection';
-import { getReview, type WeekReview } from '../lib/reviewApi';
+import { useReflectTheme } from '../constants/reflectTheme';
+import { useAuth } from '../context/AuthContext';
+import { useReflectMaya } from '../context/ReflectMayaContext';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
+import { celebrateBadges } from '../lib/badgeCelebration';
+import { checkBadges } from '../lib/badges';
+import { getMyConnections } from '../lib/communityApi';
+import { WEEKDAY_NAMES } from '../lib/goalDetailText';
+import {
+  getGoalSetupChoice,
+  saveGoalSetupChoice,
+  type GoalSetupChoice,
+} from '../lib/goalSetupChoice';
+import { getDisplayName } from '../lib/profileApi';
+import { REFLECT_MAYA } from '../lib/reflection';
+import { personName } from '../lib/reflectionFlow';
+import { cancelThisWeeksReflectionReminder } from '../lib/reminders';
+import { reflectWeekStat } from '../lib/reflectMayaPrompt';
+import { getReview, saveReflection, type PartnerCheckin, type WeekReview } from '../lib/reviewApi';
 import type { DashboardStackParamList, RootTabParamList } from '../navigation/TabNavigator';
 import type { GoalEntry, Goal } from '../types/goal';
 import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
@@ -263,16 +293,22 @@ function DaysActiveCard({
   );
 }
 
+function ReflectedCheck() {
+  return <Ionicons name="checkmark" size={18} color="#248A3D" />;
+}
+
 function NeedsAttentionCard({
   items,
   nodes,
   onPress,
   plainDetailColor,
+  reflectedIds,
 }: {
   items: AtRiskItem[];
   nodes: Goal[];
   onPress: (goalId: string) => void;
   plainDetailColor?: string;
+  reflectedIds?: ReadonlySet<string>;
 }) {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   return (
@@ -297,6 +333,7 @@ function NeedsAttentionCard({
               accessibilityRole="button"
               accessibilityLabel={`Open ${item.title}`}
             >
+              {reflectedIds?.has(item.goalId) ? <ReflectedCheck /> : null}
               <View style={styles.attentionText}>
                 {item.parentTitle ? (
                   <Text style={styles.attentionParent}>{item.parentTitle}</Text>
@@ -599,10 +636,30 @@ function attentionWarn(detail: string): boolean {
   );
 }
 
-function defaultReviewWeek(today: string, weekStartsOn: WeekStart): string {
-  const current = startOfWeek(today, weekStartsOn);
-  const offset = weekDays(today, weekStartsOn).indexOf(today);
-  return offset <= 1 ? addDays(current, -7) : current;
+const REFLECTED_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const REFLECTED_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
+function reflectedOnLine(completedAt: string): string {
+  const stamp = completedAt.length > 10 ? new Date(completedAt) : parseLocalDate(completedAt.slice(0, 10));
+  if (Number.isNaN(stamp.getTime())) {
+    return REFLECTION_COPY.reflectedOn;
+  }
+  const day = REFLECTED_WEEKDAYS[stamp.getDay()] ?? '';
+  const month = REFLECTED_MONTHS[stamp.getMonth()] ?? '';
+  return `${REFLECTION_COPY.reflectedOn} ${day}, ${month} ${stamp.getDate()}.`;
 }
 
 function reviewWeekTitle(viewed: string, current: string): string {
@@ -651,58 +708,57 @@ function missedThisWeek(
   return missed;
 }
 
-function ReflectionPrompt({
-  done,
-  windowOpen,
-  onStart,
-  onDone,
-}: {
-  done: boolean;
-  windowOpen: boolean;
-  onStart: () => void;
-  onDone: () => void;
-}) {
-  if (done) {
-    return (
-      <Pressable
-        onPress={onDone}
-        style={({ pressed }) => [styles.reflectionDone, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityLabel={REFLECTION_COPY.reflectionDone}
-      >
-        <Text style={styles.reflectionDoneText}>{REFLECTION_COPY.reflectionDone}</Text>
-      </Pressable>
-    );
-  }
-  if (windowOpen) {
-    return (
-      <View style={styles.reflectionCard}>
-        <Text style={styles.reflectionTitle}>Your weekly reflection</Text>
-        <Text style={styles.reflectionLine}>Look back on your week and plan the next one.</Text>
-        <Pressable
-          onPress={onStart}
-          style={({ pressed }) => [styles.reflectionStart, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Start"
-        >
-          <Text style={styles.reflectionStartText}>Start</Text>
-        </Pressable>
-      </View>
-    );
-  }
+function ReflectChoices({ onMaya, onOwn }: { onMaya: () => void; onOwn: () => void }) {
   return (
-    <Pressable
-      onPress={onStart}
-      style={({ pressed }) => [styles.reflectionLinkHit, pressed && styles.pressed]}
-      accessibilityRole="link"
-      accessibilityLabel="Start your reflection early"
-    >
-      <Text style={styles.reflectionLink}>Start your reflection early</Text>
-    </Pressable>
+    <View style={styles.reflectChoices}>
+      <Pressable
+        onPress={onMaya}
+        style={({ pressed }) => [styles.reflectChoice, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={REFLECTION_COPY.withMaya}
+      >
+        <Text style={styles.reflectChoiceText}>{REFLECTION_COPY.withMaya}</Text>
+      </Pressable>
+      <Pressable
+        onPress={onOwn}
+        style={({ pressed }) => [styles.reflectChoice, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel={REFLECTION_COPY.onMyOwn}
+      >
+        <Text style={styles.reflectChoiceText}>{REFLECTION_COPY.onMyOwn}</Text>
+      </Pressable>
+    </View>
   );
 }
 
+type ReflectWrap = {
+  step: ReflectWrapStep;
+  turns: ReflectWrapTurn[];
+  partnerCheckin: PartnerCheckin | null;
+  /** Null while the partner list is still loading. */
+  partners: ReflectPartner[] | null;
+  closing: string;
+};
+
+function nextWrapStep(current: ReflectWrap): ReflectWrapStep {
+  if (current.step === 'partner') {
+    return 'new';
+  }
+  return 'closing';
+}
+
+function closingLine(name: string, day: string, self: boolean): string {
+  const template = self ? REFLECT_FLOW.wrap.closingSelf : REFLECT_FLOW.wrap.closing;
+  const withDay = template.replace('[reflection day name]', day);
+  const trimmed = name.trim();
+  return trimmed ? withDay.replace('[name]', trimmed) : withDay.replace(', [name]', '');
+}
+
 export default function DashboardScreen({ navigation }: Props) {
+  const tabBarHeight = useFloatingTabBarHeight();
+  const reflect = useReflectMaya();
+  const reflectColors = useReflectTheme();
+  const { user } = useAuth();
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const [loading, setLoading] = useState(true);
@@ -713,13 +769,23 @@ export default function DashboardScreen({ navigation }: Props) {
   const [reviewEntries, setReviewEntries] = useState<GoalEntry[]>([]);
   const [activityEntries, setActivityEntries] = useState<GoalEntry[]>([]);
   const [completedOpen, setCompletedOpen] = useState(false);
-  const [viewedWeek, setViewedWeek] = useState(() =>
-    defaultReviewWeek(todayLocal(), weekStartsOn),
-  );
-  const [reflectionRow, setReflectionRow] = useState<{
-    weekStart: string;
-    review: WeekReview | null;
-  } | null>(null);
+  const [wrap, setWrap] = useState<ReflectWrap | null>(null);
+  const [wrapSaving, setWrapSaving] = useState(false);
+  const [reflectBarHeight, setReflectBarHeight] = useState(69);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupChoice, setSetupChoice] = useState<GoalSetupChoice | null>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const wrapLock = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const [viewedWeek, setViewedWeek] = useState(() => lastFullWeek(todayLocal(), weekStartsOn));
+  const [reviews, setReviews] = useState<Record<string, WeekReview | null>>({});
+  const userPaged = useRef(false);
+  const openingKey = useRef<string | null>(null);
 
   const loadDashboard = useCallback(async () => {
     setLoadError(null);
@@ -804,11 +870,9 @@ export default function DashboardScreen({ navigation }: Props) {
 
   const today = todayLocal();
   const currentWeek = startOfWeek(today, weekStartsOn);
+  const lastWeek = addDays(currentWeek, -7);
   const earliestWeek = useMemo(() => {
-    if (nodes.length === 0) {
-      return currentWeek;
-    }
-    let earliest = today;
+    let earliest = lastWeek;
     for (const node of nodes) {
       const start = goalStartDate(node);
       if (start < earliest) {
@@ -817,44 +881,111 @@ export default function DashboardScreen({ navigation }: Props) {
     }
     const week = startOfWeek(earliest, weekStartsOn);
     return week > currentWeek ? currentWeek : week;
-  }, [nodes, today, currentWeek, weekStartsOn]);
-  const weekStart =
+  }, [nodes, lastWeek, currentWeek, weekStartsOn]);
+  const reflecting = reflect?.session?.active === true;
+  const browsedWeek =
     viewedWeek < earliestWeek ? earliestWeek : viewedWeek > currentWeek ? currentWeek : viewedWeek;
+  const weekStart = reflecting && reflect?.session ? reflect.session.weekStart : browsedWeek;
+  const reflectedIds = useMemo(
+    () => new Set(reflecting && reflect?.session ? reflect.session.reflected : []),
+    [reflect, reflecting],
+  );
   const asOf = weekStart === currentWeek ? today : endOfWeek(weekStart, weekStartsOn);
   const canGoPrevious = weekStart > earliestWeek;
   const canGoNext = weekStart < currentWeek;
   const weekRange = `${formatShortDate(weekStart)} – ${formatShortDate(endOfWeek(weekStart, weekStartsOn))}`;
-  const reflectionWeek = reflectionTargetWeek(today, weekStartsOn, settings.reflectionDay);
-  const reflectionWindow = isReflectionWindow(today, settings.reflectionDay);
-  const reflectionKnown =
-    reflectionRow?.weekStart === reflectionWeek ? reflectionRow.review : undefined;
+  const viewedReview = reviews[weekStart];
+  const reviewKnown = viewedReview !== undefined;
 
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      void getReview(reflectionWeek)
-        .then((reviewRow) => {
-          if (!cancelled) {
-            setReflectionRow({ weekStart: reflectionWeek, review: reviewRow });
-          }
-        })
-        .catch((error) => {
-          console.warn('Failed to load weekly reflection', error);
-          if (!cancelled) {
-            setReflectionRow({ weekStart: reflectionWeek, review: null });
-          }
-        });
-      return () => {
-        cancelled = true;
-      };
-    }, [reflectionWeek]),
-  );
+  const rememberReview = useCallback((week: string, review: WeekReview | null) => {
+    setReviews((current) => (current[week] === review ? current : { ...current, [week]: review }));
+  }, []);
+
+  useEffect(() => {
+    if (reflecting) {
+      return;
+    }
+    const key = `${weekStartsOn}:${currentWeek}`;
+    if (openingKey.current === key) {
+      return;
+    }
+    let cancelled = false;
+    void getReview(lastWeek)
+      .then((review) => {
+        if (cancelled) {
+          return;
+        }
+        openingKey.current = key;
+        rememberReview(lastWeek, review);
+        if (!userPaged.current) {
+          setViewedWeek(review ? currentWeek : lastWeek);
+        }
+      })
+      .catch((error) => {
+        console.warn('Failed to load weekly reflection', error);
+        if (cancelled) {
+          return;
+        }
+        openingKey.current = key;
+        rememberReview(lastWeek, null);
+        if (!userPaged.current) {
+          setViewedWeek(lastWeek);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWeek, lastWeek, reflecting, rememberReview, weekStartsOn]);
+
+  useEffect(() => {
+    if (reviews[weekStart] !== undefined) {
+      return;
+    }
+    let cancelled = false;
+    void getReview(weekStart)
+      .then((review) => {
+        if (!cancelled) {
+          rememberReview(weekStart, review);
+        }
+      })
+      .catch((error) => {
+        console.warn('Failed to load weekly reflection', error);
+        if (!cancelled) {
+          rememberReview(weekStart, null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rememberReview, reviews, weekStart]);
 
   const appliedWeekStart = useRef(weekStartsOn);
   useEffect(() => {
+    if (!reflecting) {
+      reflect?.noteWeek(weekStart);
+    }
+  }, [reflect, reflecting, weekStart]);
+
+  const reflectionStartedAt = reflect?.session?.startedAt;
+  useEffect(() => {
+    setWrap(null);
+  }, [reflecting, reflectionStartedAt]);
+
+  useEffect(() => {
+    if (!wrap) {
+      return;
+    }
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [wrap]);
+
+  useEffect(() => {
+    if (reflecting) {
+      return;
+    }
     if (appliedWeekStart.current !== weekStartsOn) {
       appliedWeekStart.current = weekStartsOn;
-      setViewedWeek(defaultReviewWeek(todayLocal(), weekStartsOn));
+      userPaged.current = false;
+      openingKey.current = null;
       return;
     }
     if (loading) {
@@ -870,7 +1001,7 @@ export default function DashboardScreen({ navigation }: Props) {
       }
       return aligned;
     });
-  }, [loading, earliestWeek, currentWeek, weekStartsOn]);
+  }, [loading, earliestWeek, currentWeek, weekStartsOn, reflecting]);
 
   const displayEntries = useMemo(
     () => mergeEntries([entries, reviewEntries, activityEntries]),
@@ -980,17 +1111,175 @@ export default function DashboardScreen({ navigation }: Props) {
   );
 
   const openGoal = (goalId: string) => {
-    navigation.navigate('Goal', { goalId });
+    navigation.navigate('Goal', reflecting ? { goalId, reflect: true } : { goalId });
   };
+
+  const recordWrap = (
+    turn: ReflectWrapTurn,
+    patch: Partial<Pick<ReflectWrap, 'partnerCheckin' | 'step'>>,
+  ) => {
+    setWrap((current) => {
+      if (!current || current.step === 'closing') {
+        return current;
+      }
+      return {
+        ...current,
+        ...patch,
+        turns: [...current.turns, turn],
+        step: patch.step ?? nextWrapStep(current),
+      };
+    });
+  };
+
+  const beginWrap = async () => {
+    const session = reflect?.session;
+    if (wrapLock.current || !session?.active || wrap || wrapSaving) {
+      return;
+    }
+    wrapLock.current = true;
+    setWrap({
+      step: 'partner',
+      turns: [],
+      partnerCheckin: null,
+      partners: null,
+      closing: '',
+    });
+    let partners: ReflectPartner[] = [];
+    try {
+      const connections = await getMyConnections();
+      partners = connections
+        .filter(
+          (connection) =>
+            connection.status.toLowerCase() === 'accepted' &&
+            connection.partnerId != null &&
+            connection.role !== 'coach',
+        )
+        .map((connection) => ({
+          id: connection.id,
+          partnerId: connection.partnerId ?? '',
+          name: personName(connection),
+        }))
+        .filter((partner) => partner.partnerId.length > 0)
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+      console.warn('Failed to load partners', error);
+    } finally {
+      wrapLock.current = false;
+    }
+    if (!mounted.current) {
+      return;
+    }
+    setWrap((current) => (current && current.partners == null ? { ...current, partners } : current));
+  };
+
+  const finishDone = async (prompt: string) => {
+    const session = reflect?.session;
+    if (!session?.active || wrapSaving || wrap?.step !== 'new') {
+      return;
+    }
+    setWrapSaving(true);
+    try {
+      const saved = await saveReflection({
+        weekStart: session.weekStart,
+        donePct: donutPercent,
+        goalCheckins: session.reflected.map((goalId) => {
+          const goal = nodes.find((item) => item.id === goalId);
+          const answers = session.exchanges[goalId]?.answers;
+          const stat = goal
+            ? reflectWeekStat(goal, displayEntries, session.weekStart, weekStartsOn, todayLocal())
+            : null;
+          return {
+            goal_id: goalId,
+            week_pct: stat ? stat.percent : null,
+            target_changed: session.targets[goalId]?.changed === true,
+            r3c: answers?.r3c ?? null,
+          };
+        }),
+        partnerCheckin: wrap?.partnerCheckin ?? null,
+        coachCheckin: session.coachRequested ? 'requested' : null,
+        maya: session.maya,
+        coachLineShown: session.maya && session.coachLineShown ? session.weekStart : null,
+      });
+      try {
+        const keys = await checkBadges();
+        celebrateBadges(keys);
+      } catch (error) {
+        console.warn('Could not check badges', error);
+      }
+      const todayNow = todayLocal();
+      const current = startOfWeek(todayNow, weekStartsOn);
+      if (session.weekStart === current || session.weekStart === addDays(current, -7)) {
+        await cancelThisWeeksReflectionReminder();
+      }
+      if (!mounted.current) {
+        return;
+      }
+      rememberReview(session.weekStart, saved);
+      const closing = session.maya
+        ? closingLine(
+            await getDisplayName().catch(() => ''),
+            WEEKDAY_NAMES[settings.reflectionDay],
+            settings.mayaLevel === 'self',
+          )
+        : REFLECT_FLOW.own.done;
+      if (!mounted.current) {
+        return;
+      }
+      setWrap((currentWrap) =>
+        currentWrap
+          ? {
+              ...currentWrap,
+              step: 'closing',
+              closing,
+              turns: [...currentWrap.turns, { prompt, you: REFLECT_FLOW.wrap.done }],
+            }
+          : currentWrap,
+      );
+    } catch (error) {
+      Alert.alert(
+        REFLECTION_COPY.couldNotFinish,
+        error instanceof Error ? error.message : REFLECTION_COPY.couldNotFinish,
+      );
+    } finally {
+      if (mounted.current) {
+        setWrapSaving(false);
+      }
+    }
+  };
+
+  const openAddGoal = () => {
+    if (user?.id) {
+      void getGoalSetupChoice(user.id).then(setSetupChoice);
+    }
+    setSetupOpen(true);
+  };
+
+  const pickSetup = (choice: GoalSetupChoice) => {
+    setSetupChoice(choice);
+    setSetupOpen(false);
+    if (user?.id) {
+      void saveGoalSetupChoice(user.id, choice);
+    }
+    navigation.navigate(choice === 'maya' ? 'Maya' : 'GoalSetup');
+  };
+  const weekLocked = reflecting;
+  const donutPercent = Math.round(review.partialPct * 100);
+
+  const openReflectHelp = () => navigation.navigate('Learn', { tab: 'reflect' });
+  const screenHeader = reflecting ? (
+    <ReflectingHeader onHelp={openReflectHelp} />
+  ) : (
+    <PageHeader
+      title="Reflect"
+      subtitle="Look back on your week and plan the next"
+      help={openReflectHelp}
+    />
+  );
 
   if (loading && nodes.length === 0) {
     return (
       <View style={styles.safeArea}>
-        <PageHeader
-          title="Reflect"
-          subtitle="Look back on your week and plan the next"
-          help={() => navigation.navigate('Learn', { tab: 'reflect' })}
-        />
+        {screenHeader}
         <View style={styles.loadingState}>
           <ActivityIndicator color="#007aff" />
         </View>
@@ -1001,11 +1290,7 @@ export default function DashboardScreen({ navigation }: Props) {
   if (loadError && nodes.length === 0) {
     return (
       <View style={styles.safeArea}>
-        <PageHeader
-          title="Reflect"
-          subtitle="Look back on your week and plan the next"
-          help={() => navigation.navigate('Learn', { tab: 'reflect' })}
-        />
+        {screenHeader}
         <View style={styles.loadingState}>
           <Text style={styles.errorText}>{loadError}</Text>
           <Pressable
@@ -1019,28 +1304,64 @@ export default function DashboardScreen({ navigation }: Props) {
     );
   }
 
+  const showReflectBar = reflecting && (!wrap || wrap.step === 'closing');
+
   return (
-    <View style={styles.safeArea}>
-      <PageHeader
-        title="Reflect"
-        subtitle="Look back on your week and plan the next"
-        help={() => navigation.navigate('Learn', { tab: 'reflect' })}
-      />
+    <View style={[styles.safeArea, reflecting && { backgroundColor: reflectColors.pageTint }]}>
+      {screenHeader}
+      {reflecting && wrap ? (
+        <ReflectWrapCard
+          step={wrap.step}
+          turns={wrap.turns}
+          partners={wrap.partners}
+          closing={wrap.closing}
+          saving={wrapSaving}
+          onSendNote={(partner, prompt) => {
+            navigation.navigate('Chat', {
+              connectionId: partner.id,
+              otherId: partner.partnerId,
+              otherName: partner.name,
+              role: 'partner',
+              fromReflection: true,
+            });
+            recordWrap({ prompt, you: REFLECT_FLOW.wrap.send }, { partnerCheckin: 'yes' });
+          }}
+          onSkip={(prompt) =>
+            recordWrap({ prompt, you: REFLECT_FLOW.wrap.skip }, { partnerCheckin: 'not_yet' })
+          }
+          onInvite={(prompt) =>
+            recordWrap({ prompt, you: REFLECT_FLOW.wrap.invite }, { partnerCheckin: 'invited' })
+          }
+          onPartnerNotNow={(prompt) =>
+            recordWrap({ prompt, you: REFLECT_FLOW.wrap.notNow }, { partnerCheckin: 'not_now' })
+          }
+          onAddGoal={openAddGoal}
+          onDone={(prompt) => void finishDone(prompt)}
+          plain={reflect?.session?.maya === false}
+        />
+      ) : null}
       <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
+        ref={scrollRef}
+        style={[styles.container, reflecting && { backgroundColor: reflectColors.pageTint }]}
+        contentContainerStyle={[
+          styles.content,
+          reflecting && styles.reflectContent,
+          {
+            paddingBottom: showReflectBar ? reflectBarHeight + tabBarHeight : 24 + tabBarHeight,
+          },
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              const review = getReview(reflectionWeek)
+              const review = getReview(weekStart)
                 .then((reviewRow) => {
-                  setReflectionRow({ weekStart: reflectionWeek, review: reviewRow });
+                  rememberReview(weekStart, reviewRow);
                 })
                 .catch((error) => {
                   console.warn('Failed to load weekly reflection', error);
-                  setReflectionRow({ weekStart: reflectionWeek, review: null });
+                  rememberReview(weekStart, null);
                 });
               void Promise.all([loadDashboard(), review]).finally(() => setRefreshing(false));
             }}
@@ -1048,56 +1369,88 @@ export default function DashboardScreen({ navigation }: Props) {
           />
         }
       >
-            {reflectionKnown !== undefined ? (
-              <ReflectionPrompt
-                done={reflectionKnown != null}
-                windowOpen={reflectionWindow}
-                onStart={() => navigation.navigate('WeeklyReflection', { weekStart: reflectionWeek })}
-                onDone={() =>
-                  navigation.navigate('WeeklyReflection', { weekStart: reflectionWeek, readOnly: true })
-                }
-              />
-            ) : null}
+        {reflecting && !wrap ? (
+          <ReflectHubCard
+            percent={donutPercent}
+            maya={reflect?.session?.maya !== false}
+            weekStart={reflect?.session?.weekStart}
+          />
+        ) : null}
             <View style={styles.weekHeader}>
-              <Text style={styles.weekTitle}>{reviewWeekTitle(weekStart, currentWeek)}</Text>
+              <View style={styles.weekTitleRow}>
+                <Text style={styles.weekTitle}>{reviewWeekTitle(weekStart, currentWeek)}</Text>
+                {reviewKnown && viewedReview ? (
+                  <View style={[styles.statusChip, styles.statusChipDone]}>
+                    <Text style={styles.statusChipDoneText}>{REFLECTION_COPY.reflectedChip}</Text>
+                  </View>
+                ) : reviewKnown && !reflecting && weekStart < currentWeek ? (
+                  <View style={[styles.statusChip, styles.statusChipOpen]}>
+                    <Text style={styles.statusChipOpenText}>{REFLECTION_COPY.notReflected}</Text>
+                  </View>
+                ) : null}
+              </View>
               <View style={styles.weekNavRow}>
                 <Pressable
-                  onPress={() => setViewedWeek(addDays(weekStart, -7))}
-                  disabled={!canGoPrevious}
+                  onPress={() => {
+                    userPaged.current = true;
+                    setViewedWeek(addDays(weekStart, -7));
+                  }}
+                  disabled={weekLocked || !canGoPrevious}
                   accessibilityRole="button"
                   accessibilityLabel="Previous week"
-                  accessibilityState={{ disabled: !canGoPrevious }}
+                  accessibilityState={{ disabled: weekLocked || !canGoPrevious }}
                   style={({ pressed }) => [
                     styles.weekNavButton,
-                    pressed && canGoPrevious && styles.pressed,
+                    pressed && !weekLocked && canGoPrevious && styles.pressed,
                   ]}
                 >
                   <Ionicons
                     name="chevron-back"
                     size={22}
-                    color={canGoPrevious ? '#1C1C1E' : '#C7C7CC'}
+                    color={!weekLocked && canGoPrevious ? '#1C1C1E' : '#C7C7CC'}
                   />
                 </Pressable>
                 <Text style={styles.weekRange}>{weekRange}</Text>
                 <Pressable
-                  onPress={() => setViewedWeek(addDays(weekStart, 7))}
-                  disabled={!canGoNext}
+                  onPress={() => {
+                    userPaged.current = true;
+                    setViewedWeek(addDays(weekStart, 7));
+                  }}
+                  disabled={weekLocked || !canGoNext}
                   accessibilityRole="button"
                   accessibilityLabel="Next week"
-                  accessibilityState={{ disabled: !canGoNext }}
+                  accessibilityState={{ disabled: weekLocked || !canGoNext }}
                   style={({ pressed }) => [
                     styles.weekNavButton,
-                    pressed && canGoNext && styles.pressed,
+                    pressed && !weekLocked && canGoNext && styles.pressed,
                   ]}
                 >
                   <Ionicons
                     name="chevron-forward"
                     size={22}
-                    color={canGoNext ? '#1C1C1E' : '#C7C7CC'}
+                    color={!weekLocked && canGoNext ? '#1C1C1E' : '#C7C7CC'}
                   />
                 </Pressable>
               </View>
             </View>
+            {!reflecting && reviewKnown && viewedReview ? (
+              <Text style={styles.reflectedOn}>{reflectedOnLine(viewedReview.completedAt)}</Text>
+            ) : null}
+            {!reflecting && reviewKnown && !viewedReview && weekStart === lastWeek ? (
+              <ReflectChoices
+                onMaya={() => reflect?.begin(weekStart, true)}
+                onOwn={() => reflect?.begin(weekStart, false)}
+              />
+            ) : null}
+            {!reflecting && reviewKnown && !viewedReview && weekStart === currentWeek ? (
+              <View style={styles.reflectEarly}>
+                <Text style={styles.earlyLine}>{REFLECTION_COPY.early}</Text>
+                <ReflectChoices
+                  onMaya={() => reflect?.begin(weekStart, true)}
+                  onOwn={() => reflect?.begin(weekStart, false)}
+                />
+              </View>
+            ) : null}
             <View>
               {/* weekly metric cards go here */}
               <WeeklyProgressCard
@@ -1140,6 +1493,7 @@ export default function DashboardScreen({ navigation }: Props) {
                       accessibilityRole="button"
                       accessibilityLabel={`Open ${win.title}`}
                     >
+                      {reflectedIds.has(win.goalId) ? <ReflectedCheck /> : null}
                       <View style={styles.attentionText}>
                         {win.parentTitle ? (
                           <Text style={styles.attentionParent}>{win.parentTitle}</Text>
@@ -1169,6 +1523,7 @@ export default function DashboardScreen({ navigation }: Props) {
               nodes={nodes}
               onPress={openGoal}
               plainDetailColor={weekStart === currentWeek ? undefined : '#6B6B70'}
+              reflectedIds={reflectedIds}
             />
             <View style={styles.sectionCard}>
               <Text style={styles.cardHeader}>All goals</Text>
@@ -1206,6 +1561,7 @@ export default function DashboardScreen({ navigation }: Props) {
                       accessibilityRole="button"
                       accessibilityLabel={`Open ${goal.title}`}
                     >
+                      {reflectedIds.has(goal.id) ? <ReflectedCheck /> : null}
                       <View style={styles.attentionText}>
                         <Text style={styles.allGoalTitle} numberOfLines={2}>
                           {goal.title || 'Untitled'}
@@ -1284,17 +1640,70 @@ export default function DashboardScreen({ navigation }: Props) {
               </View>
             ) : null}
             <BadgeGrid />
-            <Pressable
-              onPress={() =>
-                navigation.getParent<NavigationProp<RootTabParamList>>()?.navigate('Goals')
-              }
-              style={({ pressed }) => [styles.planButton, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Plan next week"
-            >
-              <Text style={styles.planButtonText}>Plan next week</Text>
-            </Pressable>
+            {reflecting ? null : (
+              <Pressable
+                onPress={() =>
+                  navigation.getParent<NavigationProp<RootTabParamList>>()?.navigate('Goals')
+                }
+                style={({ pressed }) => [styles.planButton, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Plan next week"
+              >
+                <Text style={styles.planButtonText}>Plan next week</Text>
+              </Pressable>
+            )}
       </ScrollView>
+      {showReflectBar ? (
+        <View
+          collapsable={false}
+          style={[styles.reflectBarDock, { bottom: tabBarHeight }]}
+          onLayout={(event) => {
+            const height = Math.round(event.nativeEvent.layout.height);
+            setReflectBarHeight((current) => (current === height ? current : height));
+          }}
+        >
+          {wrap?.step === 'closing' ? (
+            <ReflectMayaBar
+              inset={0}
+              label={REFLECT_FLOW.wrap.close}
+              onPress={() => reflect?.end()}
+            />
+          ) : (
+            <ReflectMayaBar
+              inset={0}
+              label={REFLECT_MAYA.finish}
+              onPress={() => void beginWrap()}
+            />
+          )}
+        </View>
+      ) : null}
+      <GoalSetupChoiceSheet
+        visible={setupOpen}
+        selected={setupChoice}
+        onMaya={() => pickSetup('maya')}
+        onOwn={() => pickSetup('own')}
+        onCancel={() => setSetupOpen(false)}
+      />
+    </View>
+  );
+}
+
+function ReflectingHeader({ onHelp }: { onHelp: () => void }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.reflectingHeader, { paddingTop: insets.top }]}>
+      <View style={styles.reflectingRow}>
+        <ReflectPill nav />
+        <Pressable
+          onPress={onHelp}
+          accessibilityRole="button"
+          accessibilityLabel="Learn"
+          hitSlop={10}
+          style={styles.reflectingHelp}
+        >
+          <Ionicons name="help-circle-outline" size={20} color="#8e8e93" />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -1304,12 +1713,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f2f2f7',
   },
+  reflectBarDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 5,
+    elevation: 8,
+  },
+  reflectingHeader: {
+    backgroundColor: 'transparent',
+  },
+  reflectingRow: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reflectingHelp: {
+    position: 'absolute',
+    right: 8,
+    top: 0,
+    bottom: 0,
+    width: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     flex: 1,
   },
   content: {
     padding: 12,
     paddingBottom: 24,
+  },
+  reflectContent: {
+    paddingTop: 0,
   },
   loadingState: {
     flex: 1,
@@ -1337,10 +1773,75 @@ const styles = StyleSheet.create({
   weekHeader: {
     marginBottom: 12,
   },
+  weekTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   weekTitle: {
     fontSize: 22,
     fontWeight: '700',
     color: '#111',
+  },
+  statusChip: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  statusChipDone: {
+    backgroundColor: '#E5F6EA',
+  },
+  statusChipDoneText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#248A3D',
+  },
+  statusChipOpen: {
+    backgroundColor: '#EFEFF4',
+  },
+  statusChipOpenText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  reflectedOn: {
+    marginTop: -4,
+    marginBottom: 12,
+    fontSize: 15,
+    lineHeight: 20,
+    color: '#1C1C1E',
+  },
+  reflectEarly: {
+    marginBottom: 0,
+  },
+  earlyLine: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: '#1C1C1E',
+    marginBottom: 8,
+  },
+  reflectChoices: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  reflectChoice: {
+    minHeight: 52,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e5e5ea',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  reflectChoiceText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#111',
+    textAlign: 'center',
   },
   weekNavRow: {
     flexDirection: 'row',
@@ -1557,6 +2058,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   winRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingVertical: 8,
   },
   winTitleRow: {
@@ -1804,65 +2308,5 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 14,
     color: '#aaa',
-  },
-  reflectionCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  reflectionTitle: {
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '700',
-    color: '#111',
-  },
-  reflectionLine: {
-    fontSize: 15,
-    lineHeight: 20,
-    color: '#6B6B70',
-  },
-  reflectionStart: {
-    marginTop: 8,
-    minHeight: 44,
-    borderRadius: 10,
-    backgroundColor: '#007aff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reflectionStartText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  reflectionLinkHit: {
-    alignSelf: 'flex-start',
-    marginBottom: 14,
-    paddingVertical: 4,
-  },
-  reflectionLink: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#007aff',
-  },
-  reflectionDone: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  reflectionDoneText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#248A3D',
   },
 });

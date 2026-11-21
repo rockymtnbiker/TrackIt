@@ -28,15 +28,18 @@ import {
   FloatingAddButton,
 } from '../components/FloatingAddButton';
 import { GoalSetupChoiceSheet } from '../components/GoalSetupChoiceSheet';
+import { ConnectGroupGoalCard, ConnectGroupGoalSheet, useDismissedGroupPrompts } from '../components/ConnectGroupGoal';
+import { connectCandidates } from '../lib/groupGoalShape';
+import { GroupGoalTag, useGroupGoalLabels } from '../components/GroupGoalTag';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { DatePickerModal } from '../components/DatePickerModal';
 import { NEXT_STEP_MESSAGE, NextStepActions } from '../components/NextStepPrompt';
 import { MayaDailyCard, MayaNudgeSheet, MayaToast } from '../components/MayaDailyUi';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import { PageHeader } from '../components/PageHeader';
 import ProgressSheet from '../components/ProgressSheet';
 import { showActionSheet } from '../components/showActionSheet';
 import { AREA_ICONS } from '../constants/areaIcons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import {
   getGoalSetupChoice,
@@ -57,9 +60,7 @@ import {
 } from '../lib/goalTreeApi';
 import {
   entriesOnOrBefore,
-  isPeriodTargetMetAsOf,
   oneTimeOnDate,
-  periodTotalAsOf,
   startedOnOrBefore,
   type OneTimeOnDate,
 } from '../lib/asOfDate';
@@ -89,10 +90,12 @@ import {
   daySessionMark,
   dayTotal,
   isDayComplete,
+  isPeriodTargetMet,
   isRepeating,
   isTracked,
   latestDayEntry,
   periodTarget,
+  periodTotal,
   rollupTotal,
   timesPerDay,
   weekTargetFor,
@@ -241,12 +244,19 @@ function parentRowTitle(
 function doEntriesInPlanOrder(
   nodes: Goal[],
   childrenMap: Map<string | null, Goal[]>,
-  asOf: string,
+  selectedDate: string,
   today: string,
+  weekStartsOn: WeekStart,
 ): DoEntry[] {
-  const steps = actionableInPlanOrder(nodes, childrenMap, asOf);
+  const steps = actionableInPlanOrder(
+    nodes,
+    childrenMap,
+    selectedDate,
+    today,
+    weekStartsOn,
+  );
   const included = new Set(steps.map((step) => step.id));
-  const showNext = asOf === today;
+  const showNext = selectedDate === today;
   const entries: DoEntry[] = [];
   const seen = new Set<string>();
 
@@ -342,9 +352,6 @@ function buildStepControl(
   const amountTarget = periodAmount != null && periodAmount > 7;
   if (tracked || month || amountTarget) {
     const progress = progressRatio(row.periodCount, periodAmount);
-    if (progress >= 1 || (tracked && row.met)) {
-      return { type: 'complete', action: 'log' };
-    }
     return { type: 'continuous', progress, action: 'log' };
   }
 
@@ -363,9 +370,6 @@ function buildStepControl(
   if (target != null && target > 0 && target <= 7) {
     const total = Math.max(1, Math.round(target));
     const filled = Math.min(total, Math.max(0, Math.round(row.periodCount)));
-    if (filled >= total) {
-      return { type: 'complete', action: 'toggle' };
-    }
     return {
       type: 'segmented',
       total,
@@ -381,18 +385,11 @@ function buildStepControl(
   return { type: 'empty', action: 'toggle' };
 }
 
-function isRowDone(
-  row: RepeatingRow | undefined,
-  oneTimeDone: boolean,
-  control: StepControl,
-): boolean {
+function isRowDone(row: RepeatingRow | undefined, oneTimeDone: boolean): boolean {
   if (!row) {
     return oneTimeDone;
   }
-  if (control.type === 'complete') {
-    return true;
-  }
-  return row.isComplete || row.met;
+  return row.isComplete;
 }
 
 function periodPhrase(step: Goal): string {
@@ -414,7 +411,7 @@ function detailSubtitle(
   if (isTracked(step)) {
     const total = row
       ? row.periodCount
-      : (rollupTotal(step, nodes, entriesOnOrBefore(entries, asOf)) ?? 0);
+      : (rollupTotal(step, nodes, entries) ?? 0);
     const amountTarget = periodTarget(step, asOf, weekStartsOn);
     const target = amountTarget != null ? formatAmount(amountTarget) : '—';
     const unit = step.unit ?? '';
@@ -468,10 +465,52 @@ function listedAsRepeating(node: Goal): boolean {
   );
 }
 
+/**
+ * One-time steps done this week stay on every day of that week.
+ * A later week uses today's visibility, so a finished step drops off.
+ */
+function oneTimeForDo(
+  node: Goal,
+  selectedDate: string,
+  today: string,
+  weekStartsOn: WeekStart,
+): OneTimeOnDate {
+  const completed = node.actualEndDate?.slice(0, 10) || null;
+  if (
+    node.status === 'done' &&
+    completed != null &&
+    !isRepeating(node) &&
+    node.repeatPeriod == null &&
+    startedOnOrBefore(node, selectedDate)
+  ) {
+    const completedWeek = startOfWeek(completed, weekStartsOn);
+    const selectedWeek = startOfWeek(selectedDate, weekStartsOn);
+    if (selectedWeek === completedWeek) {
+      return 'done';
+    }
+    if (selectedWeek > completedWeek) {
+      return oneTimeOnDate(node, today);
+    }
+  }
+  return oneTimeOnDate(node, selectedDate);
+}
+
+/** Last day of the selected week that still counts. Never past today. */
+function weekProgressThrough(
+  selectedDate: string,
+  today: string,
+  weekStartsOn: WeekStart,
+): string {
+  const weekEnd = endOfWeek(selectedDate, weekStartsOn);
+  return weekEnd < today ? weekEnd : today;
+}
+
 /** True when a descendant is already the row for this branch on D. */
 function workLivesOnDescendant(
   node: Goal,
-  asOf: string,
+  selectedDate: string,
+  today: string,
+  weekStartsOn: WeekStart,
   childrenMap: Map<string | null, Goal[]>,
 ): boolean {
   const stack = [...(childrenMap.get(node.id) ?? [])];
@@ -483,10 +522,10 @@ function workLivesOnDescendant(
       continue;
     }
     seen.add(child.id);
-    if (listedAsRepeating(child) && startedOnOrBefore(child, asOf)) {
+    if (listedAsRepeating(child) && startedOnOrBefore(child, selectedDate)) {
       return true;
     }
-    if (oneTimeOnDate(child, asOf) !== 'hidden') {
+    if (oneTimeForDo(child, selectedDate, today, weekStartsOn) !== 'hidden') {
       return true;
     }
     for (const grandchild of childrenMap.get(child.id) ?? []) {
@@ -499,14 +538,16 @@ function workLivesOnDescendant(
 
 function showsInProgress(
   node: Goal,
-  asOf: string,
+  selectedDate: string,
+  today: string,
+  weekStartsOn: WeekStart,
   childrenMap: Map<string | null, Goal[]>,
 ): boolean {
-  const appearance = oneTimeOnDate(node, asOf);
+  const appearance = oneTimeForDo(node, selectedDate, today, weekStartsOn);
   if (appearance === 'hidden') {
     return false;
   }
-  if (workLivesOnDescendant(node, asOf, childrenMap)) {
+  if (workLivesOnDescendant(node, selectedDate, today, weekStartsOn, childrenMap)) {
     return false;
   }
   return isLeaf(node, childrenMap) || appearance === 'open';
@@ -519,14 +560,16 @@ function showsInProgress(
 function actionableInPlanOrder(
   nodes: Goal[],
   childrenMap: Map<string | null, Goal[]>,
-  asOf: string,
+  selectedDate: string,
+  today: string,
+  weekStartsOn: WeekStart,
 ): Goal[] {
   const included = new Set(
     nodes
       .filter(
         (node) =>
-          (listedAsRepeating(node) && startedOnOrBefore(node, asOf)) ||
-          showsInProgress(node, asOf, childrenMap),
+          (listedAsRepeating(node) && startedOnOrBefore(node, selectedDate)) ||
+          showsInProgress(node, selectedDate, today, weekStartsOn, childrenMap),
       )
       .map((node) => node.id),
   );
@@ -1136,23 +1179,26 @@ function dateKey(date: Date): string {
 function WeekDots({
   goal,
   entries,
-  asOf,
+  selectedDate,
+  today,
   weekStartsOn,
 }: {
   goal: Goal;
   entries: GoalEntry[];
-  asOf: string;
+  selectedDate: string;
+  today: string;
   weekStartsOn: WeekStart;
 }) {
-  const days = weekDays(asOf, weekStartsOn);
+  const days = weekDays(selectedDate, weekStartsOn);
   const labels = weekdayLabels(weekStartsOn);
   const start = goalStartDate(goal);
   const startWeek = startOfWeek(start, weekStartsOn);
+  const through = weekProgressThrough(selectedDate, today, weekStartsOn);
   const available = new Set(
-    weekTargetFor(goal, asOf, weekStartsOn).availableDays.map(dateKey),
+    weekTargetFor(goal, selectedDate, weekStartsOn).availableDays.map(dateKey),
   );
   const doneNames = days
-    .filter((day) => day <= asOf && day >= start && dayFill(goal, entries, day) === 'complete')
+    .filter((day) => day <= through && day >= start && dayFill(goal, entries, day) === 'complete')
     .map((day) => labels[days.indexOf(day)] ?? '');
   const label =
     doneNames.length > 0 ? `Done ${doneNames.join(', ')}` : 'No days done';
@@ -1180,8 +1226,8 @@ function WeekDots({
             </View>
           );
         }
-        const selected = day === asOf;
-        const after = day > asOf;
+        const selected = day === selectedDate;
+        const after = day > through;
         const fill = dayFill(goal, entries, day);
         const sessions = after ? null : daySessionMark(goal, entries, day);
         return (
@@ -1212,6 +1258,7 @@ function WeekDots({
 
 function DoRow({
   title,
+  groupName,
   parentTitle,
   detail,
   overdue,
@@ -1228,6 +1275,7 @@ function DoRow({
   onControl,
 }: {
   title: string;
+  groupName?: string | null;
   parentTitle?: string;
   detail?: string;
   overdue: boolean;
@@ -1278,6 +1326,7 @@ function DoRow({
           <Text style={[styles.checklistTitle, done && styles.checklistTitleDone]}>
             {title}
           </Text>
+          {groupName ? <GroupGoalTag name={groupName} /> : null}
           {fresh ? (
             <View style={styles.newPill}>
               <Text style={styles.newPillText}>New</Text>
@@ -1345,7 +1394,7 @@ export default function TodayScreen() {
   const freshGoalId = route.params?.freshGoalId;
   const { user } = useAuth();
   const { settings } = useSettings();
-  const insets = useSafeAreaInsets();
+  const tabBarHeight = useFloatingTabBarHeight();
   const weekStartsOn = settings.weekStart;
   const today = todayLocal();
   const todayWeekStart = startOfWeek(today, weekStartsOn);
@@ -1382,6 +1431,25 @@ export default function TodayScreen() {
   cardGoalRef.current = cardGoalId;
 
   const [nodes, setNodes] = useState<Goal[]>([]);
+  const groupLabels = useGroupGoalLabels(nodes.map((node) => node.groupGoalId));
+  const { dismissed: dismissedPrompts, dismiss: dismissPrompt } = useDismissedGroupPrompts(user?.id);
+  const [connectCopyId, setConnectCopyId] = useState<string | null>(null);
+  const connectPrompts = useMemo(
+    () =>
+      nodes.filter((goal) => {
+        const name = goal.groupGoalId ? groupLabels.get(goal.groupGoalId)?.name : undefined;
+        return (
+          goal.parentId == null &&
+          goal.groupGoalId != null &&
+          goal.groupLink !== 'connected' &&
+          Boolean(name) &&
+          !dismissedPrompts.has(goal.groupGoalId) &&
+          connectCandidates(goal, nodes).length > 0
+        );
+      }),
+    [nodes, groupLabels, dismissedPrompts],
+  );
+  const connectCopy = nodes.find((goal) => goal.id === connectCopyId) ?? null;
   const [entries, setEntries] = useState<GoalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1427,12 +1495,14 @@ export default function TodayScreen() {
         return [];
       }
       const weekEnd = endOfWeek(weekStart, weekStartsOn);
+      const today = todayLocal();
+      const through = weekEnd < today ? today : weekEnd;
       const monthStart = `${weekStart.slice(0, 7)}-01`;
       const lookbackStart = addDays(weekStart, -STREAK_LOOKBACK_DAYS);
       return getEntries(
         ids,
         lookbackStart < monthStart ? lookbackStart : monthStart,
-        weekEnd,
+        through,
       );
     },
     [weekStartsOn],
@@ -1816,11 +1886,14 @@ export default function TodayScreen() {
 
   const repeatingRows = useMemo(() => {
     const future = isFutureDate(selectedDate, today);
+    const through = weekProgressThrough(selectedDate, today, weekStartsOn);
+    const weekEntries = entriesOnOrBefore(entries, through);
+    const streakEntries = entriesOnOrBefore(entries, today);
     return nodes
       .filter((node) => listedAsRepeating(node))
       .map((node): RepeatingRow => {
         const tracked = isTracked(node);
-        const total = periodTotalAsOf(node, entries, selectedDate, weekStartsOn);
+        const total = periodTotal(node, weekEntries, selectedDate, weekStartsOn);
         const period = periodPhrase(node);
         return {
           id: node.id,
@@ -1828,10 +1901,10 @@ export default function TodayScreen() {
           tracked,
           isComplete: isDayComplete(node, entries, selectedDate),
           isInteractive: !future,
-          met: isPeriodTargetMetAsOf(node, entries, selectedDate, weekStartsOn),
+          met: isPeriodTargetMet(node, weekEntries, selectedDate, weekStartsOn),
           streak: calculateStreak(
-            completionDates(node, entriesOnOrBefore(entries, selectedDate)),
-            selectedDate,
+            completionDates(node, streakEntries),
+            today,
             goalStartDate(node),
           ),
           periodCount: total,
@@ -1842,8 +1915,8 @@ export default function TodayScreen() {
   }, [entries, nodes, selectedDate, today, weekStartsOn]);
 
   const doEntries = useMemo(
-    () => doEntriesInPlanOrder(nodes, childrenMap, selectedDate, today),
-    [childrenMap, nodes, selectedDate, today],
+    () => doEntriesInPlanOrder(nodes, childrenMap, selectedDate, today, weekStartsOn),
+    [childrenMap, nodes, selectedDate, today, weekStartsOn],
   );
   const stepGroups = useMemo(
     () => groupDoEntries(doEntries, nodesById),
@@ -2444,6 +2517,10 @@ export default function TodayScreen() {
       contentContainerStyle={[
         styles.content,
         cardMode ? styles.contentWithCard : null,
+        {
+          paddingBottom:
+            (cardMode ? 150 : 24) + FLOATING_ADD_BUTTON_CLEARANCE + tabBarHeight,
+        },
       ]}
       refreshControl={
         <RefreshControl
@@ -2553,6 +2630,19 @@ export default function TodayScreen() {
       </View>
       </View>
 
+      {connectPrompts.map((goal) => (
+        <ConnectGroupGoalCard
+          key={goal.id}
+          groupName={groupLabels.get(goal.groupGoalId as string)?.name ?? ''}
+          title={goal.title || 'Untitled'}
+          onConnect={() => setConnectCopyId(goal.id)}
+          onKeepSeparate={() => {
+            if (goal.groupGoalId) {
+              void dismissPrompt(goal.groupGoalId);
+            }
+          }}
+        />
+      ))}
       {stepGroups.length > 0 ? (
         <>
         {activeTip ? (
@@ -2640,22 +2730,23 @@ export default function TodayScreen() {
                 const step = entry.step;
                 const row = repeatingById.get(step.id);
                 const futureDay = isFutureDate(selectedDate, today);
-                const appearance = oneTimeOnDate(step, selectedDate);
+                const appearance = oneTimeForDo(step, selectedDate, today, weekStartsOn);
                 const oneTimeDone = appearance === 'done';
+                const through = weekProgressThrough(selectedDate, today, weekStartsOn);
                 const control = buildStepControl(
                   step,
                   row,
                   nodes,
-                  entriesOnOrBefore(entries, selectedDate),
+                  entriesOnOrBefore(entries, through),
                   oneTimeDone,
                   selectedDate,
                   weekStartsOn,
                 );
-                const done = isRowDone(row, oneTimeDone, control);
+                const done = isRowDone(row, oneTimeDone);
                 const detail = detailSubtitle(
                   step,
                   row,
-                  entries,
+                  entriesOnOrBefore(entries, through),
                   nodes,
                   done,
                   selectedDate,
@@ -2716,6 +2807,9 @@ export default function TodayScreen() {
                     {rowIndex > 0 ? <View style={styles.hairline} /> : null}
                     <DoRow
                       title={step.title}
+                      groupName={
+                        step.groupGoalId ? groupLabels.get(step.groupGoalId)?.name : null
+                      }
                       parentTitle={parentRowTitle(step, nodesById)}
                       detail={detail?.text}
                       overdue={detail?.overdue ?? false}
@@ -2731,7 +2825,8 @@ export default function TodayScreen() {
                           <WeekDots
                             goal={step}
                             entries={entries}
-                            asOf={selectedDate}
+                            selectedDate={selectedDate}
+                            today={today}
                             weekStartsOn={weekStartsOn}
                           />
                         ) : undefined
@@ -2759,6 +2854,19 @@ export default function TodayScreen() {
         </View>
       )}
     </ScrollView>
+      <ConnectGroupGoalSheet
+        visible={connectCopy != null}
+        copy={connectCopy}
+        goals={nodes}
+        groupName={
+          connectCopy?.groupGoalId ? (groupLabels.get(connectCopy.groupGoalId)?.name ?? '') : ''
+        }
+        onClose={() => setConnectCopyId(null)}
+        onConnected={() => {
+          setConnectCopyId(null);
+          void loadTodayData(visibleWeekStartRef.current);
+        }}
+      />
       <FloatingAddButton onPress={openCreate} />
       {setupSheet}
       {cardMode ? (
@@ -2905,7 +3013,7 @@ export default function TodayScreen() {
         />
       ) : null}
       {mayaToast ? (
-        <MayaToast text={mayaToast} bottom={insets.bottom + 72} />
+        <MayaToast text={mayaToast} bottom={tabBarHeight + 16} />
       ) : null}
       {mayaNudge ? (
         <MayaNudgeSheet

@@ -77,6 +77,11 @@ export function reflectionTargetWeek(
   return lastDay <= date.slice(0, 10) ? current : addDays(current, -7);
 }
 
+/** The most recent week that has fully ended. On the first day of a week, that is the week that just ended. */
+export function lastFullWeek(date: string, weekStartsOn: WeekStart): string {
+  return addDays(startOfWeek(date, weekStartsOn), -7);
+}
+
 /** The reflection weekday inside the week that contains `date`. */
 export function reflectionDateInWeek(
   date: string,

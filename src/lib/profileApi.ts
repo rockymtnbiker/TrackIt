@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 
 type ProfileRow = {
@@ -84,6 +85,32 @@ export async function getDisplayName(): Promise<string> {
   return profile.displayName;
 }
 
+/** Raw profiles.age_range. Empty when the person has not answered. */
+export async function getStoredAgeRange(): Promise<string | null> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('age_range')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const value = (data as ProfileRow | null)?.age_range?.trim() ?? '';
+  return value ? value : null;
+}
+
+/** Groups are 13+. The stored value "Under 13" is the only block. */
+export function isUnder13(age: string | null): boolean {
+  if (!age) {
+    return false;
+  }
+  const key = age.trim().toLowerCase();
+  return key === 'under 13' || key === 'under_13' || key === 'under-13';
+}
+
 export async function getAgeRange(): Promise<AgeRange | null> {
   const userId = await requireUserId();
   const { data, error } = await supabase
@@ -106,6 +133,34 @@ export async function saveAgeRange(ageRange: AgeRange): Promise<void> {
   if (error) {
     throw error;
   }
+}
+
+const TEMPERATURES = ['level-up', 'handling', 'stretched', 'stuck'] as const;
+
+export type TemperatureId = (typeof TEMPERATURES)[number];
+
+function temperatureKey(userId: string): string {
+  return `maya-temperature:${userId}`;
+}
+
+function temperatureFromStored(value: string | null): TemperatureId | null {
+  return TEMPERATURES.find((item) => item === value) ?? null;
+}
+
+/** Once per user on this device. profiles has no column for this answer. */
+export async function getTemperature(): Promise<TemperatureId | null> {
+  try {
+    const userId = await requireUserId();
+    const raw = await AsyncStorage.getItem(temperatureKey(userId));
+    return temperatureFromStored(raw);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveTemperature(temperature: TemperatureId): Promise<void> {
+  const userId = await requireUserId();
+  await AsyncStorage.setItem(temperatureKey(userId), temperature);
 }
 
 export async function saveDisplayName(displayName: string): Promise<void> {

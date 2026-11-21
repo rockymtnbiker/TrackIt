@@ -2,10 +2,10 @@
 
 export const JOB_OPENING = {
   intro:
-    "Hey [name], I'm Maya, your Automated Advisor. I'm here to help you become your best you. Let's get you started. I'll ask you a few questions and then suggest some options based on your answers. Go with my suggestions or customize them to fit better.",
+    "Hey [name], I'm Maya, your Automated Advisor. I'll help you get started on the path to becoming a better you by setting and achieving goals. I'll ask you a few questions and then suggest some options based on your answers. Then you fine tune the details to make the goal yours.",
   letsGo: "Let's go",
   own: 'I already know what I want',
-  temp: "Before we dive in, how's life feeling lately?",
+  temp: 'Before we dive in, how have you been feeling lately?',
   area: 'Which of these is taking up the most space in your head right now?',
   job: 'Get a job',
 } as const;

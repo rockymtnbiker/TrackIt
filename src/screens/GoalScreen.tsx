@@ -1,11 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  Keyboard,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -17,6 +20,13 @@ import {
 import { ScrollView } from 'react-native-gesture-handler';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { DatePickerModal } from '../components/DatePickerModal';
+import { ReflectMayaBar } from '../components/ReflectMayaBar';
+import { ReflectMayaCard, ReflectPill } from '../components/ReflectMayaCard';
+import { useReflectMaya } from '../context/ReflectMayaContext';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
+import { REFLECT_MAYA } from '../lib/reflection';
+import { ShareWithSection } from '../components/GroupGoalShare';
+import { GroupGoalTag, useGroupGoalLabels } from '../components/GroupGoalTag';
 import { MessageAboutGoal } from '../components/MessageAboutGoal';
 import { BlockRowPress, DEFAULT_DRAGGABLE_ITEM_HEIGHT, DraggableItem } from '../components/DraggableItem';
 import { StatusLine } from '../components/StatusLine';
@@ -27,6 +37,11 @@ import ProgressSheet from '../components/ProgressSheet';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { KeyboardSafe } from '../components/KeyboardSafe';
+import { useReflectTheme } from '../constants/reflectTheme';
+import { ConnectGroupGoalCard, ConnectGroupGoalSheet, useDismissedGroupPrompts } from '../components/ConnectGroupGoal';
+import { connectCandidates } from '../lib/groupGoalShape';
+import { disconnectGoal, getGroup, updateGroupGoal, type GroupGoalInput } from '../lib/groupsApi';
+import { REFLECT_POINT, useReflectPoint } from '../lib/reflectPoint';
 import { showActionSheet } from '../components/showActionSheet';
 import { PendingStatusCircle } from '../components/PendingStatusCircle';
 import {
@@ -38,6 +53,7 @@ import {
   type StepTreeRow,
 } from '../lib/goalAnalysis';
 import { periodTotalAsOf } from '../lib/asOfDate';
+import { planSources } from '../lib/metrics';
 import {
   createGoal,
   convertRepeatingToParent,
@@ -45,6 +61,7 @@ import {
   deleteEntryById,
   getAllGoals,
   getEntries,
+  getGoal,
   insertEntry,
   reorderGoals,
   saveGoalProgress,
@@ -79,11 +96,12 @@ import {
 import type { GoalsStackParamList } from '../navigation/GoalsStackNavigator';
 import type { Goal, GoalEntry, GoalStatus } from '../types/goal';
 import type { WeekStart } from '../lib/settingsApi';
-import { startOfWeek, weekDays } from '../lib/week';
+import { endOfWeek, startOfWeek, weekDays } from '../lib/week';
 import { parseLocalDate, toLocalDateString, todayLocal } from '../lib/localDate';
 import { DETAIL_LABELS } from '../lib/goalDetailText';
 import { pastDueStatus } from '../lib/statusMessages';
 import { STATUS_COLORS } from '../constants';
+import { REFLECT_FLOW } from '../constants/maya/reflectFlow';
 import { REFLECTION_COPY } from '../constants/reflection';
 import { formatDate, formatShortDate, isPastDate } from '../utils/date';
 import { GoalReadout } from '../components/GoalReadout';
@@ -258,6 +276,7 @@ type StepSiblingListProps = {
   onOpen: (id: string) => void;
   onSetTargetDate?: (goal: Goal) => void;
   onReorder: (parentId: string, from: number, to: number) => void;
+  pointRow?: (id: string, row: ReactNode) => ReactNode;
 };
 
 function StepSiblingList({
@@ -272,6 +291,7 @@ function StepSiblingList({
   onOpen,
   onSetTargetDate,
   onReorder,
+  pointRow,
 }: StepSiblingListProps) {
   const siblings = childrenMap.get(parentId) ?? [];
   const heightsRef = useRef<number[]>([]);
@@ -353,6 +373,7 @@ function StepSiblingList({
               onOpen={onOpen}
               onSetTargetDate={onSetTargetDate}
               onReorder={onReorder}
+              pointRow={pointRow}
             />
           ) : null;
 
@@ -365,7 +386,7 @@ function StepSiblingList({
                 accessibilityRole="button"
                 accessibilityLabel={goal.title || 'Untitled'}
               >
-                {rowBody}
+                {pointRow ? pointRow(goal.id, rowBody) : rowBody}
               </Pressable>
               {nestedList}
             </View>
@@ -390,7 +411,7 @@ function StepSiblingList({
                 heightsRef.current[index] = event.nativeEvent.layout.height;
               }}
             >
-              {rowBody}
+              {pointRow ? pointRow(goal.id, rowBody) : rowBody}
               {nestedList}
             </View>
           </DraggableItem>
@@ -437,18 +458,37 @@ function ProgressReadout({
 }
 
 export default function GoalScreen({ navigation, route }: Props) {
+  const tabBarHeight = useFloatingTabBarHeight();
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [reflectBarHeight, setReflectBarHeight] = useState(112);
   const { goalId, readOnly = false, sharedByName } = route.params;
   const editReminder = route.params.editReminder === true && !readOnly;
-  const startEditing = route.params.startEditing === true && !readOnly;
   const fromReflection = route.params.fromReflection === true;
+  const reflectMode = route.params.reflect === true;
+  const reflect = useReflectMaya();
+  const withMaya = reflectMode && reflect?.session?.maya === true;
+  const reflectColors = useReflectTheme();
+  const reflectPage = reflectMode ? { backgroundColor: reflectColors.pageTint } : null;
   const { user } = useAuth();
   const ownerId = readOnly ? route.params.ownerId : user?.id;
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const today = todayLocal();
+  const reflectWeek = reflectMode ? (reflect?.session?.weekStart ?? null) : null;
+  const numbersAsOf =
+    reflectWeek == null
+      ? today
+      : endOfWeek(reflectWeek, weekStartsOn) < today
+        ? endOfWeek(reflectWeek, weekStartsOn)
+        : today;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [node, setNode] = useState<Goal | null>(null);
+  const groupLabels = useGroupGoalLabels([node?.groupGoalId]);
+  const groupLabel = node?.groupGoalId ? groupLabels.get(node.groupGoalId) : undefined;
+  const [groupAdmin, setGroupAdmin] = useState(false);
+  const { dismissed, dismiss } = useDismissedGroupPrompts(user?.id);
+  const [connectOpen, setConnectOpen] = useState(false);
   const [nodes, setNodes] = useState<Goal[]>([]);
   const [entries, setEntries] = useState<GoalEntry[]>([]);
   const [children, setChildren] = useState<Goal[]>([]);
@@ -458,22 +498,42 @@ export default function GoalScreen({ navigation, route }: Props) {
   const [progressOpen, setProgressOpen] = useState(false);
   const [logAmount, setLogAmount] = useState('');
   const [logError, setLogError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState('');
-  const [saving, setSaving] = useState(false);
   const [targetDateFor, setTargetDateFor] = useState<Goal | null>(null);
   const entryBusy = useRef(false);
   const addInputRef = useRef<TextInputInstance>(null);
   const focusAddRef = useRef(false);
   const editRef = useRef<GoalEditFormHandle>(null);
   const scrollRef = useRef<ScrollViewInstance>(null);
-  const primedReminder = useRef(false);
+  const reflectPoint = useReflectPoint(scrollRef);
   const scrolledReminder = useRef(false);
-  const allowLeaveRef = useRef(false);
-  const editingRef = useRef(editing);
-  editingRef.current = editing;
+  useEffect(() => {
+    const groupId = groupLabel?.groupId;
+    if (!groupId || readOnly) {
+      setGroupAdmin(false);
+      return;
+    }
+    let cancel = false;
+    void getGroup(groupId)
+      .then((detail) => {
+        if (!cancel) {
+          setGroupAdmin(detail.role === 'admin');
+        }
+      })
+      .catch(() => {
+        if (!cancel) {
+          setGroupAdmin(false);
+        }
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [groupLabel?.groupId, readOnly]);
+
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+  const nodeRef = useRef(node);
+  nodeRef.current = node;
+  const savedRevision = useRef(0);
   const orderVersionRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -486,27 +546,29 @@ export default function GoalScreen({ navigation, route }: Props) {
       return;
     }
     setLoadError(null);
+    const seen = savedRevision.current;
     try {
       const nextNodes = await getAllGoals(ownerId);
       const found = nextNodes.find((item) => item.id === goalId) ?? null;
       const ids = found ? subtreeIds(found.id, nextNodes) : [];
       const nextEntries = ids.length > 0 ? await getEntries(ids, undefined, undefined, ownerId) : [];
-      setNodes(nextNodes);
-      setNode(found);
+      const kept = savedRevision.current !== seen ? nodeRef.current : null;
+      const goal = kept?.id === goalId ? kept : found;
+      const merged =
+        goal && goal !== found
+          ? nextNodes.map((item) => (item.id === goal.id ? goal : item))
+          : nextNodes;
+      setNodes(merged);
+      setNode(goal);
       setEntries(nextEntries);
-      setChildren(buildChildrenMap(nextNodes).get(goalId) ?? []);
-      if (found && (editReminder || startEditing) && !primedReminder.current) {
-        primedReminder.current = true;
-        setEditTitle(found.title);
-        setEditing(true);
-      }
+      setChildren(buildChildrenMap(merged).get(goalId) ?? []);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Failed to load goal.');
       setNode(null);
     } finally {
       setLoading(false);
     }
-  }, [goalId, ownerId, readOnly, editReminder, startEditing]);
+  }, [goalId, ownerId, readOnly]);
 
   const openTargetDate = useCallback(
     (goal: Goal) => {
@@ -551,9 +613,9 @@ export default function GoalScreen({ navigation, route }: Props) {
         });
         return;
       }
-      navigation.push('Goal', { goalId: id });
+      navigation.push('Goal', reflectMode ? { goalId: id, reflect: true } : { goalId: id });
     },
-    [navigation, ownerId, readOnly, sharedByName],
+    [navigation, ownerId, readOnly, reflectMode, sharedByName],
   );
 
   const reorderSiblings = useCallback(
@@ -611,9 +673,21 @@ export default function GoalScreen({ navigation, route }: Props) {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: '',
+      headerTitle: reflectMode ? () => <ReflectPill nav /> : '',
       headerRight: () => null,
     });
-  }, [navigation]);
+  }, [navigation, reflectMode]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvent, () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener(hideEvent, () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (!focusAddRef.current || !node || isRepeating(node) || children.length === 0) {
@@ -623,29 +697,66 @@ export default function GoalScreen({ navigation, route }: Props) {
     requestAnimationFrame(() => addInputRef.current?.focus());
   }, [node, children]);
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
-      if (allowLeaveRef.current) {
-        return;
+  const applyReflectGoals = (updated: Goal[]) => {
+    setNodes((current) => {
+      const byId = new Map(current.map((item) => [item.id, item]));
+      for (const item of updated) {
+        byId.set(item.id, item);
       }
-      if (!editingRef.current || !editRef.current?.isDirty()) {
-        return;
-      }
-      event.preventDefault();
-      Alert.alert('Discard changes?', undefined, [
-        {
-          text: 'Discard',
-          style: 'destructive',
-          onPress: () => {
-            allowLeaveRef.current = true;
-            navigation.dispatch(event.data.action);
-          },
-        },
-        { text: 'Keep editing', style: 'cancel' },
-      ]);
+      return [...byId.values()];
     });
-    return unsubscribe;
+    setNode((current) => {
+      if (!current) {
+        return current;
+      }
+      return updated.find((item) => item.id === current.id) ?? current;
+    });
+    setChildren((current) => {
+      const parentId = node?.id;
+      if (!parentId) {
+        return current;
+      }
+      const next = current.map((item) => updated.find((row) => row.id === item.id) ?? item);
+      const extras = updated.filter(
+        (item) => item.parentId === parentId && !current.some((child) => child.id === item.id),
+      );
+      return extras.length > 0 ? [...next, ...extras] : next;
+    });
+  };
+
+  useEffect(() => {
+    const persist = () => {
+      editRef.current?.persist();
+    };
+    const unsubscribeBlur = navigation.addListener('blur', persist);
+    const unsubscribeRemove = navigation.addListener('beforeRemove', persist);
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        persist();
+      }
+    });
+    return () => {
+      unsubscribeBlur();
+      unsubscribeRemove();
+      subscription.remove();
+    };
   }, [navigation]);
+
+  useEffect(() => {
+    if (!reflectMode || !node) {
+      return;
+    }
+    reflect?.noteTarget(node.id, node.targetAmount);
+  }, [reflect, reflectMode, node]);
+
+  const pointTo = (id: string) => {
+    reflectPoint.pointTo(id);
+    if (id === REFLECT_POINT.addStep) {
+      addInputRef.current?.focus();
+      return;
+    }
+    editRef.current?.focusField(id);
+  };
 
   const addStep = () => {
     const trimmed = newTitle.trim();
@@ -898,7 +1009,7 @@ export default function GoalScreen({ navigation, route }: Props) {
 
   if (loading && !node) {
     return (
-      <View style={styles.missing}>
+      <View style={[styles.missing, reflectPage]}>
         <ActivityIndicator color="#007aff" />
       </View>
     );
@@ -906,7 +1017,7 @@ export default function GoalScreen({ navigation, route }: Props) {
 
   if (loadError && !node) {
     return (
-      <View style={styles.missing}>
+      <View style={[styles.missing, reflectPage]}>
         <Text style={styles.missingText}>{loadError}</Text>
       </View>
     );
@@ -914,41 +1025,24 @@ export default function GoalScreen({ navigation, route }: Props) {
 
   if (!node) {
     return (
-      <View style={styles.missing}>
+      <View style={[styles.missing, reflectPage]}>
         <Text style={styles.missingText}>This goal is no longer available.</Text>
       </View>
     );
   }
-
-  const saveEdit = async () => {
-    if (!editRef.current || saving || editTitle.trim().length === 0) {
-      return;
-    }
-    setSaving(true);
-    try {
-      const updated = await editRef.current.save();
-      setNode(updated);
-      setNodes((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item)),
-      );
-      setEditing(false);
-      await load();
-    } catch (error) {
-      Alert.alert(
-        'Save failed',
-        error instanceof Error ? error.message : 'Could not save.',
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const parent =
     node.parentId != null
       ? (nodes.find((item) => item.id === node.parentId) ?? null)
       : null;
   const line = summaryLine(node, weekStartsOn);
-  const analysis = goalAnalysis(node, nodes, entries, today, weekStartsOn);
+  const analysis = goalAnalysis(
+    node,
+    nodes,
+    entries,
+    isRepeating(node) ? numbersAsOf : today,
+    weekStartsOn,
+  );
   const childrenMap = buildChildrenMap(nodes);
   const deal = bigDealSummary(node, nodes, today);
   const tree = deal ? stepTree(node, nodes) : [];
@@ -963,7 +1057,9 @@ export default function GoalScreen({ navigation, route }: Props) {
   const doses = timesPerDay(node);
   const doseProgress = dayProgress(node, entries, today);
   const sessionsToday = dayCount(entries, node.id, today);
-  const showProgress = !editing && canSetProgress(node);
+  const showProgress = canSetProgress(node);
+  const loggedIds = new Set([node.id, ...planSources(node, nodes).map((source) => source.id)]);
+  const showLogged = readOnly || entries.some((entry) => loggedIds.has(entry.goalId));
   const progressValue = showProgress ? effectivePct(node, { nodes, entries }) : null;
   const progressCaption =
     showProgress && children.length > 0 && node.status !== 'done'
@@ -1010,8 +1106,8 @@ export default function GoalScreen({ navigation, route }: Props) {
       });
   };
 
-  const canAddStep = !readOnly && !isRepeating(node);
-  const breakIntoSteps = !readOnly && isRepeating(node) && children.length === 0;
+  const canAddStep = !readOnly && !isRepeating(node) && node.groupGoalId == null;
+  const breakIntoSteps = !readOnly && isRepeating(node) && children.length === 0 && node.groupGoalId == null;
   const addPlaceholder =
     children.length === 0
       ? node.parentId == null
@@ -1045,6 +1141,23 @@ export default function GoalScreen({ navigation, route }: Props) {
     </Pressable>
   );
 
+  const saveGroupCopy = async (input: GroupGoalInput) => {
+    if (!node.groupGoalId) {
+      return;
+    }
+    await updateGroupGoal(node.groupGoalId, input);
+    const fresh = await getGoal(node.id);
+    if (fresh) {
+      applySavedGoal(fresh);
+    }
+  };
+
+  const applySavedGoal = (updated: Goal) => {
+    savedRevision.current += 1;
+    setNode(updated);
+    setNodes((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+  };
+
   const scrollReminderIntoView = () => {
     if (!editReminder || scrolledReminder.current) {
       return;
@@ -1065,139 +1178,20 @@ export default function GoalScreen({ navigation, route }: Props) {
     );
   };
 
-  return (
-    <KeyboardSafe style={styles.container}>
-      {fromReflection ? (
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={({ pressed }) => [styles.reflectionBar, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel={REFLECTION_COPY.backToReflection}
-        >
-          <Ionicons name="chevron-back" size={18} color="#007aff" />
-          <Text style={styles.reflectionBarText}>{REFLECTION_COPY.backToReflection}</Text>
-        </Pressable>
-      ) : null}
-      <ScrollView
-        ref={scrollRef}
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        // The gesture-handler scroll view otherwise cancels the long-press
-        // drag as soon as the finger moves.
-        disallowInterruption={false}
-      >
-        <View style={styles.titleBlock}>
-          {!editing && parent ? (
-            <Pressable
-              onPress={() => openGoal(parent.id)}
-              hitSlop={6}
-              accessibilityRole="link"
-              accessibilityLabel={`Open ${parent.title}`}
-              style={({ pressed }) => [styles.parentLink, pressed && styles.pressed]}
-            >
-              <Ionicons name="chevron-up" size={14} color="#007aff" />
-              <Text style={styles.parentTitle} numberOfLines={1}>
-                {parent.title || 'Untitled'}
-              </Text>
-            </Pressable>
-          ) : null}
-          <View style={styles.titleLine}>
-            {editing ? (
-              <TextInput
-                value={editTitle}
-                onChangeText={setEditTitle}
-                placeholder="Untitled"
-                placeholderTextColor="#c7c7cc"
-                style={styles.title}
-                multiline
-                accessibilityLabel="Title"
-              />
-            ) : (
-              <Text style={styles.title}>{node.title || 'Untitled'}</Text>
-            )}
-            {readOnly ? null : (
-            <View style={styles.titleActions}>
-              {editing ? (
-                <>
-                  <Pressable
-                    onPress={() => setEditing(false)}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel="Cancel"
-                    style={styles.titleAction}
-                  >
-                    <Ionicons name="close" size={26} color="#111" />
-                  </Pressable>
-                  <Pressable
-                    onPress={() => void saveEdit()}
-                    disabled={saving || editTitle.trim().length === 0}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel="Save"
-                    accessibilityState={{ disabled: saving || editTitle.trim().length === 0 }}
-                    style={styles.titleAction}
-                  >
-                    <Ionicons
-                      name="checkmark"
-                      size={28}
-                      color={saving || editTitle.trim().length === 0 ? '#b0b0b5' : '#007aff'}
-                    />
-                  </Pressable>
-                </>
-              ) : (
-                <Pressable
-                  onPress={() => {
-                    setEditTitle(node.title);
-                    setEditing(true);
-                  }}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit"
-                  style={styles.titleAction}
-                >
-                  <Ionicons name="pencil" size={22} color="#007aff" />
-                </Pressable>
-              )}
-            </View>
-            )}
-          </View>
-          {readOnly && sharedByName ? (
-            <Text style={styles.sharedBy}>Shared by {sharedByName}</Text>
-          ) : null}
-          {editing ? null : (
-          <View style={styles.metaRow}>
-            <View style={[styles.pill, styles[`pill_${node.status}`]]}>
-              <Text style={[styles.pillText, styles[`pillText_${node.status}`]]}>
-                {STATUS_LABEL[node.status]}
-              </Text>
-            </View>
-            {line ? <Text style={styles.metaLine}>{line}</Text> : null}
-          </View>
-          )}
-        </View>
-
-        {editing ? (
-          <GoalEditForm
-            key={node.id}
-            ref={editRef}
-            goal={node}
-            nodes={nodes}
-            title={editTitle}
-            onReminderLayout={editReminder ? scrollReminderIntoView : undefined}
-            onDeleted={() => {
-              allowLeaveRef.current = true;
-              navigation.goBack();
-            }}
-          />
-        ) : null}
-
+  const weekLabel = reflectWeek
+    ? REFLECT_FLOW.weekOf.replace(
+        '[Mon D–Mon D]',
+        `${formatShortDate(reflectWeek)}–${formatShortDate(endOfWeek(reflectWeek, weekStartsOn))}`,
+      )
+    : null;
+  const goalMetrics = (
+    <>
+        {weekLabel ? <Text style={styles.reflectWeekLabel}>{weekLabel}</Text> : null}
         {showProgress && children.length === 0 ? (
           <View style={styles.paddedCard}>{progressControl}</View>
         ) : null}
 
-        {!editing && deal ? (
+        {deal ? (
           <View style={styles.analysisCard}>
             {showProgress ? progressControl : null}
             <Text style={styles.dealHeadline}>{deal.headline}</Text>
@@ -1249,11 +1243,12 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {!editing && analysis && isRepeating(node) ? (
+        {showLogged && analysis && isRepeating(node) ? (
           <WeeklyAnalysis
             node={node}
             entries={entries}
             today={today}
+            asOf={numbersAsOf}
             analysis={analysis}
             loggedToday={loggedToday}
             doseLabel={
@@ -1283,7 +1278,7 @@ export default function GoalScreen({ navigation, route }: Props) {
           />
         ) : null}
 
-        {!editing && analysis && !isRepeating(node) ? (
+        {analysis && !isRepeating(node) ? (
           <View style={styles.analysisCard}>
             <View style={styles.analysisRow}>
               {readOnly ? (
@@ -1308,14 +1303,7 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {!editing && node.parentId == null && whyText ? (
-          <View style={styles.paddedCard}>
-            <Text style={styles.sectionLabel}>Why it matters</Text>
-            <Text style={styles.whyQuote}>{`“${whyText}”`}</Text>
-          </View>
-        ) : null}
-
-        {!editing && streaks ? (
+        {showLogged && streaks ? (
           <View style={styles.streakRow}>
             <StreakTile
               label="Current streak"
@@ -1326,20 +1314,24 @@ export default function GoalScreen({ navigation, route }: Props) {
           </View>
         ) : null}
 
-        {!editing ? (
+        {showLogged ? (
           <GoalReadout
             node={node}
             nodes={nodes}
             entries={entries}
+            asOf={numbersAsOf}
             onSetTargetDate={readOnly ? undefined : () => openTargetDate(node)}
           />
         ) : null}
 
-        {!editing ? (
+        {showLogged ? (
           <SixWeekSection node={node} nodes={nodes} entries={entries} />
         ) : null}
-
-        {!editing && tree.length > 0 ? (
+    </>
+  );
+  const goalSteps = (
+    <>
+{tree.length > 0 ? (
           <View style={styles.treeCard}>
             <StepSiblingList
               parentId={node.id}
@@ -1353,20 +1345,206 @@ export default function GoalScreen({ navigation, route }: Props) {
               onOpen={openGoal}
               onSetTargetDate={readOnly ? undefined : openTargetDate}
               onReorder={reorderSiblings}
+              pointRow={
+                reflectMode
+                  ? (id, row) => reflectPoint.anchor(REFLECT_POINT.step(id), row)
+                  : undefined
+              }
             />
-            {canAddStep ? <View style={styles.treeAdd}>{stepAddField}</View> : null}
+            {canAddStep ? (
+              <View style={styles.treeAdd}>
+                {reflectMode ? reflectPoint.anchor(REFLECT_POINT.addStep, stepAddField) : stepAddField}
+              </View>
+            ) : null}
           </View>
-        ) : !editing && (canAddStep || breakIntoSteps) ? (
+        ) : canAddStep || breakIntoSteps ? (
           <View style={styles.treeCard}>
-            <View style={styles.treeAdd}>{breakIntoSteps ? breakStepButton : stepAddField}</View>
+            <View style={styles.treeAdd}>
+              {reflectMode
+                ? reflectPoint.anchor(
+                    REFLECT_POINT.addStep,
+                    breakIntoSteps ? breakStepButton : stepAddField,
+                  )
+                : breakIntoSteps
+                  ? breakStepButton
+                  : stepAddField}
+            </View>
           </View>
         ) : null}
+    </>
+  );
 
-        {!editing ? <GoalDetailCards goal={node} /> : null}
+  const showReflectBar = reflectMode && !keyboardOpen;
 
-        {!editing ? <MessageAboutGoal goalId={topGoal(node, nodes).id} /> : null}
+  return (
+    <View style={[styles.container, reflectPage]}>
+    <KeyboardSafe style={styles.container}>
+      {fromReflection && !reflectMode ? (
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.reflectionBar, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={REFLECTION_COPY.backToReflection}
+        >
+          <Ionicons name="chevron-back" size={18} color="#007aff" />
+          <Text style={styles.reflectionBarText}>{REFLECTION_COPY.backToReflection}</Text>
+        </Pressable>
+      ) : null}
+      <ScrollView
+        ref={scrollRef}
+        style={[styles.container, reflectPage]}
+        contentContainerStyle={[
+          styles.content,
+          reflectMode && { paddingTop: 4 },
+          {
+            paddingBottom: reflectMode
+              ? keyboardOpen
+                ? 16
+                : reflectBarHeight + tabBarHeight
+              : 32 + tabBarHeight,
+          },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        // The gesture-handler scroll view otherwise cancels the long-press
+        // drag as soon as the finger moves.
+        disallowInterruption={false}
+      >
+        {withMaya ? (
+          <ReflectMayaCard
+            goal={node}
+            nodes={nodes}
+            entries={entries}
+            onPoint={pointTo}
+            onOpenGoal={openGoal}
+            onGoalsUpdated={applyReflectGoals}
+          />
+        ) : null}
+        {readOnly ? (
+          <>
+            <View style={styles.titleBlock}>
+              {parent ? (
+                <Pressable
+                  onPress={() => openGoal(parent.id)}
+                  hitSlop={6}
+                  accessibilityRole="link"
+                  accessibilityLabel={`Open ${parent.title}`}
+                  style={({ pressed }) => [styles.parentLink, pressed && styles.pressed]}
+                >
+                  <Ionicons name="chevron-up" size={14} color="#007aff" />
+                  <Text style={styles.parentTitle} numberOfLines={1}>
+                    {parent.title || 'Untitled'}
+                  </Text>
+                </Pressable>
+              ) : null}
+              <Text style={styles.title}>{node.title || 'Untitled'}</Text>
+              {groupLabel ? <GroupGoalTag name={groupLabel.name} /> : null}
+              {sharedByName ? (
+                <Text style={styles.sharedBy}>Shared by {sharedByName}</Text>
+              ) : null}
+              <View style={styles.metaRow}>
+                <View style={[styles.pill, styles[`pill_${node.status}`]]}>
+                  <Text style={[styles.pillText, styles[`pillText_${node.status}`]]}>
+                    {STATUS_LABEL[node.status]}
+                  </Text>
+                </View>
+                {line ? <Text style={styles.metaLine}>{line}</Text> : null}
+              </View>
+            </View>
+            {node.parentId == null && whyText ? (
+              <View style={styles.paddedCard}>
+                <Text style={styles.sectionLabel}>Why it matters</Text>
+                <Text style={styles.whyQuote}>{`“${whyText}”`}</Text>
+              </View>
+            ) : null}
+            {goalMetrics}
+            {goalSteps}
+            <GoalDetailCards goal={node} />
+            <MessageAboutGoal goalId={topGoal(node, nodes).id} />
+          </>
+        ) : (
+          <>
+            {parent ? (
+              <Pressable
+                onPress={() => openGoal(parent.id)}
+                hitSlop={6}
+                accessibilityRole="link"
+                accessibilityLabel={`Open ${parent.title}`}
+                style={({ pressed }) => [styles.parentLink, pressed && styles.pressed]}
+              >
+                <Ionicons name="chevron-up" size={14} color="#007aff" />
+                <Text style={styles.parentTitle} numberOfLines={1}>
+                  {parent.title || 'Untitled'}
+                </Text>
+              </Pressable>
+            ) : null}
+          <GoalEditForm
+            key={node.id}
+            ref={editRef}
+            goal={node}
+            nodes={nodes}
+            metrics={goalMetrics}
+            steps={goalSteps}
+            beforeDelete={<MessageAboutGoal goalId={topGoal(node, nodes).id} />}
+            anchor={reflectMode ? reflectPoint.anchor : undefined}
+            onReminderLayout={editReminder ? scrollReminderIntoView : undefined}
+            onSaved={applySavedGoal}
+            onDeleted={() => {
+              navigation.goBack();
+            }}
+            groupCopy={
+              node.groupGoalId
+                ? {
+                    groupName: groupLabel?.name ?? '',
+                    link: node.groupLink === 'connected' ? 'connected' : 'copy',
+                    admin: Boolean(groupLabel) && groupAdmin,
+                    onSaveForEveryone: saveGroupCopy,
+                    onDisconnect: async () => {
+                      await disconnectGoal(node.id);
+                    },
+                    onChanged: () => {
+                      void load();
+                    },
+                    onConnect:
+                      node.groupLink === 'connected' ? undefined : () => setConnectOpen(true),
+                  }
+                : null
+            }
+          />
+          {node.groupGoalId &&
+          node.groupLink !== 'connected' &&
+          groupLabel &&
+          !dismissed.has(node.groupGoalId) &&
+          connectCandidates(node, nodes).length > 0 ? (
+            <ConnectGroupGoalCard
+              groupName={groupLabel.name}
+              title={node.title || 'Untitled'}
+              onConnect={() => setConnectOpen(true)}
+              onKeepSeparate={() => {
+                void dismiss(node.groupGoalId as string);
+              }}
+            />
+          ) : null}
+          {node.parentId == null ? <ShareWithSection goalId={node.id} /> : null}
+          </>
+        )}
       </ScrollView>
 
+      <ConnectGroupGoalSheet
+        visible={connectOpen && node.groupLink !== 'connected'}
+        copy={node.groupLink === 'connected' ? null : node}
+        goals={nodes}
+        groupName={groupLabel?.name ?? ''}
+        onClose={() => setConnectOpen(false)}
+        onConnected={(personalGoalId) => {
+          setConnectOpen(false);
+          if (personalGoalId === goalId) {
+            void load();
+            return;
+          }
+          navigation.setParams({ goalId: personalGoalId });
+        }}
+      />
       <ProgressSheet
         visible={progressOpen && !readOnly}
         title={node.title}
@@ -1452,6 +1630,27 @@ export default function GoalScreen({ navigation, route }: Props) {
         />
       ) : null}
     </KeyboardSafe>
+    {showReflectBar ? (
+      <View
+        style={[styles.reflectBarDock, { bottom: tabBarHeight }]}
+        onLayout={(event) => {
+          const height = Math.round(event.nativeEvent.layout.height);
+          setReflectBarHeight((current) => (current === height ? current : height));
+        }}
+      >
+        <ReflectMayaBar
+          inset={0}
+          label={REFLECTION_COPY.doneGoal}
+          onPress={() => {
+            reflect?.markReflected(node.id);
+            navigation.popToTop();
+          }}
+          secondaryLabel={REFLECT_MAYA.back}
+          onSecondary={() => navigation.goBack()}
+        />
+      </View>
+    ) : null}
+    </View>
   );
 }
 
@@ -1630,27 +1829,29 @@ function dateKey(date: Date): string {
 function WeekStrip({
   node,
   entries,
-  today,
+  asOf,
+  markDay,
 }: {
   node: Goal;
   entries: GoalEntry[];
-  today: string;
+  asOf: string;
+  markDay: string | null;
 }) {
   const { settings } = useSettings();
   const weekStartsOn = settings.weekStart;
   const start = goalStartDate(node);
   const startWeek = startOfWeek(start, weekStartsOn);
   const available = new Set(
-    weekTargetFor(node, today, weekStartsOn).availableDays.map(dateKey),
+    weekTargetFor(node, asOf, weekStartsOn).availableDays.map(dateKey),
   );
   const visibleEntries = entries.filter((entry) => {
     const date = entry.entryDate.slice(0, 10);
-    return entry.goalId === node.id && date <= today && date >= start;
+    return entry.goalId === node.id && date <= asOf && date >= start;
   });
 
   return (
     <View style={styles.weekStrip}>
-      {weekDays(today, weekStartsOn).map((day) => {
+      {weekDays(asOf, weekStartsOn).map((day) => {
         if (startOfWeek(day, weekStartsOn) < startWeek) {
           return <View key={day} style={styles.dotSlot} />;
         }
@@ -1666,8 +1867,8 @@ function WeekStrip({
             </View>
           );
         }
-        const isToday = day === today;
-        const after = day > today;
+        const isToday = markDay != null && day === markDay;
+        const after = day > asOf;
         const fill = dayFill(node, visibleEntries, day);
         const sessions = after ? null : daySessionMark(node, visibleEntries, day);
         return (
@@ -1700,6 +1901,7 @@ function WeeklyAnalysis({
   node,
   entries,
   today,
+  asOf,
   analysis,
   loggedToday,
   doseLabel = null,
@@ -1710,6 +1912,7 @@ function WeeklyAnalysis({
   node: Goal;
   entries: GoalEntry[];
   today: string;
+  asOf: string;
   analysis: { headline: string; detail: string; tone: AnalysisTone };
   loggedToday: boolean;
   doseLabel?: string | null;
@@ -1718,8 +1921,8 @@ function WeeklyAnalysis({
   onPress: () => void;
 }) {
   const { settings } = useSettings();
-  const { target } = weekTargetFor(node, today, settings.weekStart);
-  const total = periodTotalAsOf(node, entries, today, settings.weekStart);
+  const { target } = weekTargetFor(node, asOf, settings.weekStart);
+  const total = periodTotalAsOf(node, entries, asOf, settings.weekStart);
   return (
     <View style={styles.analysisCard}>
       <View style={styles.analysisRow}>
@@ -1727,11 +1930,16 @@ function WeeklyAnalysis({
           total={total}
           target={target}
           tracked={isTracked(node)}
-          loggedToday={loggedToday}
+          loggedToday={asOf === today && loggedToday}
         />
         <AnalysisCopy analysis={analysis} onSetTargetDate={onSetTargetDate} />
       </View>
-      <WeekStrip node={node} entries={entries} today={today} />
+      <WeekStrip
+        node={node}
+        entries={entries}
+        asOf={asOf}
+        markDay={asOf === today ? today : null}
+      />
       {canLog ? (
         <Pressable
           onPress={onPress}
@@ -1807,6 +2015,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f2f2f7',
   },
+  reflectBarDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+  },
+  reflectWeekLabel: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6B6B70',
+    marginBottom: 8,
+    marginHorizontal: 4,
+  },
   reflectionBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1842,21 +2062,6 @@ const styles = StyleSheet.create({
   titleBlock: {
     gap: 6,
     paddingHorizontal: 4,
-  },
-  titleLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  titleActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  titleAction: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   parentLink: {
     flexDirection: 'row',

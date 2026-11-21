@@ -1,10 +1,42 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
+import {
+  type BottomTabBarProps,
+  type BottomTabNavigationEventMap,
+  type BottomTabNavigationOptions,
+  type BottomTabNavigatorProps,
+  type BottomTabTypeBag,
+} from '@react-navigation/bottom-tabs';
+import {
+  CommonActions,
+  createNavigatorFactory,
+  TabRouter,
+  useNavigationBuilder,
+  type NavigatorTypeBagBase,
+  type ParamListBase,
+  type StaticConfig,
+  type TabActionHelpers,
+  type TabNavigationState,
+  type TabRouterOptions,
+  type TypedNavigator,
+  type NavigatorScreenParams,
+} from '@react-navigation/native';
+import { SafeAreaProviderCompat } from '@react-navigation/elements';
+import { useSharedValue } from 'react-native-reanimated';
+import { FloatingTabBar, FloatingTabBarHeightProvider } from './FloatingTabBar';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import type { NavigatorScreenParams } from '@react-navigation/native';
-import { Platform, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Platform,
+  ScrollView,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ScrollViewInstance,
+} from 'react-native';
 import { CommunityProvider, useCommunity } from '../context/CommunityContext';
+import { ReflectMayaProvider } from '../context/ReflectMayaContext';
 import ChatScreen from '../screens/ChatScreen';
 import MayaFlowScreen from '../screens/MayaFlowScreen';
 import PartnerScreen from '../screens/PartnerScreen';
@@ -35,6 +67,8 @@ export type { TodayStackParamList };
 export type DashboardStackParamList = {
   DashboardMain: undefined;
   WeeklyReflection: { weekStart: string; readOnly?: boolean };
+  GoalSetup: undefined;
+  Maya: undefined;
   Partner: { connectionId: string; name: string; partnerId: string | null };
   Goal: GoalRouteParams;
   Chat: ChatParams;
@@ -43,7 +77,174 @@ export type DashboardStackParamList = {
   HowItWorks: undefined;
 };
 
-const Tab = createMaterialTopTabNavigator<RootTabParamList>();
+/**
+ * Pages sit side by side in a normal scroll view and follow the finger.
+ * The SwiftUI tab pager aborts on iOS 26 when a page holds a native-stack screen.
+ */
+function SlidingPager({ state, navigation, descriptors }: Omit<BottomTabBarProps, 'insets'>) {
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const offsetX = useRef(0);
+  const widthRef = useRef(0);
+  const placed = useRef(false);
+  const initialOffset = useRef<{ x: number; y: number } | null>(null);
+  const [frame, setFrame] = useState({ width: 0, height: 0 });
+  const progress = useSharedValue(state.index);
+  const focused = state.routes[state.index];
+  const nestedIndex =
+    focused?.state && typeof focused.state.index === 'number' ? focused.state.index : 0;
+
+  if (initialOffset.current == null && frame.width > 0) {
+    initialOffset.current = { x: state.index * frame.width, y: 0 };
+  }
+
+  useEffect(() => {
+    if (frame.width <= 0) {
+      return;
+    }
+    const target = state.index * frame.width;
+    if (!placed.current) {
+      placed.current = true;
+      offsetX.current = target;
+      widthRef.current = frame.width;
+      return;
+    }
+    const widthChanged = widthRef.current !== frame.width;
+    widthRef.current = frame.width;
+    if (!widthChanged && Math.abs(offsetX.current - target) < 2) {
+      return;
+    }
+    offsetX.current = target;
+    scrollRef.current?.scrollTo({ x: target, y: 0, animated: !widthChanged });
+  }, [frame.width, state.index]);
+
+  const onPagerLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setFrame((current) =>
+      current.width === width && current.height === height ? current : { width, height },
+    );
+  };
+
+  const onSettle = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (frame.width <= 0) {
+      return;
+    }
+    const x = event.nativeEvent.contentOffset.x;
+    offsetX.current = x;
+    const next = Math.max(
+      0,
+      Math.min(state.routes.length - 1, Math.round(x / frame.width)),
+    );
+    const route = state.routes[next];
+    if (!route || next === state.index) {
+      return;
+    }
+    navigation.dispatch({
+      ...CommonActions.navigate(route.name),
+      target: state.key,
+    });
+  };
+
+  return (
+    <SafeAreaProviderCompat style={styles.column}>
+    <FloatingTabBarHeightProvider>
+    <View style={styles.column}>
+      <View style={styles.pager} onLayout={onPagerLayout}>
+        {frame.width > 0 && frame.height > 0 ? (
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            disableIntervalMomentum
+            directionalLockEnabled
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsHorizontalScrollIndicator={false}
+            scrollEnabled={nestedIndex === 0}
+            contentInsetAdjustmentBehavior="never"
+            contentOffset={initialOffset.current ?? undefined}
+            scrollEventThrottle={16}
+            onScroll={(event) => {
+              if (frame.width <= 0) {
+                return;
+              }
+              progress.value = event.nativeEvent.contentOffset.x / frame.width;
+            }}
+            onMomentumScrollEnd={onSettle}
+            removeClippedSubviews={false}
+            style={styles.pager}
+          >
+            {state.routes.map((route) => (
+              <View
+                key={route.key}
+                collapsable={false}
+                style={{ width: frame.width, height: frame.height, overflow: 'hidden' }}
+              >
+                {descriptors[route.key].render()}
+              </View>
+            ))}
+          </ScrollView>
+        ) : null}
+      </View>
+      <FloatingTabBar
+        state={state}
+        navigation={navigation}
+        descriptors={descriptors}
+        progress={progress}
+      />
+    </View>
+    </FloatingTabBarHeightProvider>
+    </SafeAreaProviderCompat>
+  );
+}
+
+function SlidingTabNavigator({
+  id,
+  initialRouteName,
+  backBehavior,
+  UNSTABLE_routeNamesChangeBehavior,
+  children,
+  layout,
+  screenListeners,
+  screenOptions,
+  screenLayout,
+  UNSTABLE_router,
+}: BottomTabNavigatorProps) {
+  const { state, descriptors, navigation, NavigationContent } = useNavigationBuilder<
+    TabNavigationState<ParamListBase>,
+    TabRouterOptions,
+    TabActionHelpers<ParamListBase>,
+    BottomTabNavigationOptions,
+    BottomTabNavigationEventMap
+  >(TabRouter, {
+    id,
+    initialRouteName,
+    backBehavior,
+    UNSTABLE_routeNamesChangeBehavior,
+    children,
+    layout,
+    screenListeners,
+    screenOptions,
+    screenLayout,
+    UNSTABLE_router,
+  });
+
+  return (
+    <NavigationContent>
+      <SlidingPager state={state} navigation={navigation} descriptors={descriptors} />
+    </NavigationContent>
+  );
+}
+
+function createSlidingTabNavigator<
+  const ParamList extends ParamListBase,
+  const NavigatorID extends string | undefined = string | undefined,
+  const TypeBag extends NavigatorTypeBagBase = BottomTabTypeBag<ParamList, NavigatorID>,
+  const Config extends StaticConfig<TypeBag> = StaticConfig<TypeBag>,
+>(config?: Config): TypedNavigator<TypeBag, Config> {
+  return createNavigatorFactory(SlidingTabNavigator)(config);
+}
+
+const Tab = createSlidingTabNavigator<RootTabParamList>();
 const TodayStack = createNativeStackNavigator<TodayStackParamList>();
 const DashboardStack = createNativeStackNavigator<DashboardStackParamList>();
 
@@ -102,6 +303,7 @@ function TodayStackNavigator() {
 
 function DashboardStackNavigator() {
   return (
+    <ReflectMayaProvider>
     <DashboardStack.Navigator>
       <DashboardStack.Screen
         name="DashboardMain"
@@ -118,6 +320,21 @@ function DashboardStackNavigator() {
         options={{
           presentation: 'fullScreenModal',
           title: 'Weekly reflection',
+          headerTitleAlign: 'center',
+          headerBackVisible: false,
+        }}
+      />
+      <DashboardStack.Screen
+        name="GoalSetup"
+        component={GoalSetupScreen}
+        options={{ title: 'Step 1 of 3', headerTitleAlign: 'center' }}
+      />
+      <DashboardStack.Screen
+        name="Maya"
+        component={MayaFlowScreen}
+        options={{
+          presentation: 'fullScreenModal',
+          title: 'Maya',
           headerTitleAlign: 'center',
           headerBackVisible: false,
         }}
@@ -156,6 +373,7 @@ function DashboardStackNavigator() {
         options={{ headerShown: false }}
       />
     </DashboardStack.Navigator>
+    </ReflectMayaProvider>
   );
 }
 
@@ -168,47 +386,18 @@ function ConnectDot() {
 }
 
 function TabScreens() {
-  const insets = useSafeAreaInsets();
   const { hasAttention } = useCommunity();
-  const tabBarHeight = 49 + insets.bottom;
 
   return (
     <Tab.Navigator
       initialRouteName="Today"
-      tabBarPosition="bottom"
+      detachInactiveScreens={false}
       screenOptions={{
-        swipeEnabled: true,
-        tabBarShowIcon: true,
-        tabBarShowLabel: true,
+        headerShown: false,
+        lazy: false,
+        animation: 'none',
         tabBarActiveTintColor: Platform.OS === 'ios' ? '#007AFF' : '#007aff',
         tabBarInactiveTintColor: Platform.OS === 'ios' ? '#8E8E93' : '#737373',
-        tabBarPressColor: 'transparent',
-        tabBarPressOpacity: 0.7,
-        tabBarIndicatorStyle: {
-          height: 0,
-          width: 0,
-        },
-        tabBarStyle: {
-          backgroundColor: Platform.OS === 'ios' ? '#F9F9F9' : '#ffffff',
-          borderTopColor: Platform.OS === 'ios' ? '#A7A7AA' : '#e0e0e0',
-          borderTopWidth: StyleSheet.hairlineWidth,
-          height: tabBarHeight,
-          paddingBottom: insets.bottom,
-          elevation: 8,
-          shadowColor: '#000',
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          shadowOffset: { width: 0, height: -1 },
-        },
-        tabBarItemStyle: {
-          paddingVertical: 4,
-        },
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '500',
-          textTransform: 'none',
-          marginTop: 2,
-        },
       }}
     >
       <Tab.Screen
@@ -288,6 +477,12 @@ export default function TabNavigator() {
 }
 
 const styles = StyleSheet.create({
+  column: {
+    flex: 1,
+  },
+  pager: {
+    flex: 1,
+  },
   tabIcon: {
     marginTop: 2,
   },

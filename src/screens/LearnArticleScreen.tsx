@@ -1,17 +1,22 @@
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { learnItem } from '../constants/learn';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 
 type Props = {
   route: { params: { id: string } };
 };
 
 export default function LearnArticleScreen({ route }: Props) {
+  const tabBarHeight = useFloatingTabBarHeight();
   const item = learnItem(route.params.id);
   const body = item?.kind === 'text' ? (item.body ?? item.summary) : '';
 
   return (
     <View style={styles.screen}>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={[styles.content, { paddingBottom: 32 + tabBarHeight }]}
+      >
         <Text style={styles.placeholder}>Placeholder: more topics and videos are coming.</Text>
         {item && item.kind === 'text' ? (
           <>

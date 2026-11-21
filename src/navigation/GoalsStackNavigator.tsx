@@ -16,12 +16,12 @@ export type GoalRouteParams = {
   readOnly?: boolean;
   ownerId?: string;
   sharedByName?: string;
-  /** Open the goal already editing, scrolled to the Reminder row. */
+  /** Open the goal scrolled to the Reminder row. */
   editReminder?: boolean;
-  /** Open the goal already in edit mode. */
-  startEditing?: boolean;
   /** Show a bar that returns to the weekly reflection in progress. */
   fromReflection?: boolean;
+  /** Goal page opened while the Reflect tab is in reflect mode. */
+  reflect?: boolean;
 };
 
 export type ChatParams = {

@@ -44,6 +44,12 @@ export type Goal = {
   progressPct: number | null;
   /** Oldest first. Absent until the goal tree has been loaded. */
   targetHistory?: GoalTarget[];
+  /** Set when this goal tracks a group goal, either as a copy or a connected personal goal. */
+  groupGoalId: string | null;
+  /** copy = the automatic group copy. connected = a personal goal linked to the group. */
+  groupLink: 'copy' | 'connected' | null;
+  /** Entries on or after this time count toward the group. Null when the goal is not linked. */
+  connectedAt: string | null;
 };
 
 export type GoalEntry = {

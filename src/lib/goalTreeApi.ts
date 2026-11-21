@@ -46,6 +46,9 @@ type GoalRow = {
   reminder_time?: string | null;
   starter_key?: string | null;
   progress_pct?: number | string | null;
+  group_goal_id?: string | null;
+  group_link?: string | null;
+  connected_at?: string | null;
 };
 
 export type GoalInput = {
@@ -149,6 +152,9 @@ function mapRowToNode(row: GoalRow): Goal {
     reminderTime: normalizeClock(row.reminder_time),
     starterKey: blankToNull(row.starter_key),
     progressPct: mapProgressPct(row.progress_pct),
+    groupGoalId: row.group_goal_id ?? null,
+    groupLink: row.group_link === 'copy' || row.group_link === 'connected' ? row.group_link : null,
+    connectedAt: row.connected_at ?? null,
   };
 }
 

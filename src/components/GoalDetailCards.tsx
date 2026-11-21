@@ -1,9 +1,28 @@
+import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSettings } from '../context/SettingsContext';
-import { goalDetailSections, type DetailSection } from '../lib/goalDetailText';
+import { goalDetailSections, type DetailRow, type DetailSection } from '../lib/goalDetailText';
+import { reflectDetailPoint } from '../lib/reflectMayaPrompt';
 import type { Goal } from '../types/goal';
 
-function SectionCard({ section }: { section: DetailSection }) {
+function DetailRowView({ row }: { row: DetailRow }) {
+  return (
+    <View style={styles.row}>
+      <Text style={styles.label}>{row.label}</Text>
+      <Text style={styles.value}>{row.value}</Text>
+    </View>
+  );
+}
+
+function SectionCard({
+  section,
+  goal,
+  wrapRow,
+}: {
+  section: DetailSection;
+  goal: Goal;
+  wrapRow?: (id: 'target' | 'targetEnd', row: ReactNode) => ReactNode;
+}) {
   const notes = section.id === 'notes';
   return (
     <View style={styles.card}>
@@ -11,24 +30,35 @@ function SectionCard({ section }: { section: DetailSection }) {
       {notes ? (
         <Text style={styles.notes}>{section.rows[0]?.value}</Text>
       ) : (
-        section.rows.map((row) => (
-          <View key={row.label} style={styles.row}>
-            <Text style={styles.label}>{row.label}</Text>
-            <Text style={styles.value}>{row.value}</Text>
-          </View>
-        ))
+        section.rows.map((row) => {
+          const line = <DetailRowView row={row} />;
+          if (!wrapRow) {
+            return <DetailRowView key={row.label} row={row} />;
+          }
+          const pointId = reflectDetailPoint(goal, section.id, row.label);
+          if (!pointId) {
+            return <DetailRowView key={row.label} row={row} />;
+          }
+          return <View key={row.label}>{wrapRow(pointId, line)}</View>;
+        })
       )}
     </View>
   );
 }
 
-export default function GoalDetailCards({ goal }: { goal: Goal }) {
+export default function GoalDetailCards({
+  goal,
+  wrapRow,
+}: {
+  goal: Goal;
+  wrapRow?: (id: 'target' | 'targetEnd', row: ReactNode) => ReactNode;
+}) {
   const { settings } = useSettings();
   const sections = goalDetailSections(goal, settings.weekStart);
   return (
     <View style={styles.list}>
       {sections.map((section) => (
-        <SectionCard key={section.id} section={section} />
+        <SectionCard key={section.id} section={section} goal={goal} wrapRow={wrapRow} />
       ))}
     </View>
   );

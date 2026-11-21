@@ -1,4 +1,4 @@
-import { JOB_OPENING } from './jobFlow';
+import { JOB_IMPORTANCE, JOB_OPENING } from './jobFlow';
 
 export type MayaDestination =
   | { type: 'node'; id: string }
@@ -100,9 +100,9 @@ export const MAYA_DISCOVER: MayaContent = {
     },
     {
       id: 'area',
-      kind: 'multi',
+      kind: 'single',
       text: JOB_OPENING.area,
-      next: { type: 'areas' },
+      next: { type: 'branch' },
       options: [
         { id: 'job', label: JOB_OPENING.job, branch: 'job-entry' },
         { id: 'classes', label: 'Classes and grades' },
@@ -235,11 +235,11 @@ export const MAYA_DISCOVER: MayaContent = {
     {
       id: 'wantLow',
       kind: 'single',
-      text: 'Fair. What would make it an 8? Or is something else actually more important right now?',
+      text: JOB_IMPORTANCE.low,
       next: { type: 'choice' },
       options: [
-        { id: 'keep', label: "Let's keep going", to: { type: 'node', id: 'playback' } },
-        { id: 'else', label: 'Something else matters more', to: { type: 'node', id: 'area' } },
+        { id: 'keep', label: JOB_IMPORTANCE.keep, to: { type: 'node', id: 'playback' } },
+        { id: 'else', label: JOB_IMPORTANCE.else, to: { type: 'node', id: 'area' } },
       ],
     },
     {

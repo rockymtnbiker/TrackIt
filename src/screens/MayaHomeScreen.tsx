@@ -2,15 +2,12 @@ import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { todayLocal } from '../lib/localDate';
 import { getDisplayName } from '../lib/profileApi';
-import { saveReflectionPath } from '../lib/reflectionChoice';
-import { getReflectionDraft, saveReflectionDraft, type ReflectionDraft } from '../lib/reflectionDraft';
-import { getReview } from '../lib/reviewApi';
-import { reflectionTargetWeek } from '../lib/week';
+import { getReview, reflectOpenWeek } from '../lib/reviewApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 
 type Props = NativeStackScreenProps<CommunityStackParamList, 'MayaHome'>;
 
@@ -21,28 +18,6 @@ function hello(name: string): string {
     : 'Hi. What would you like to work on?';
 }
 
-function mayaStart(changes: string[]): ReflectionDraft {
-  return {
-    section: 'look',
-    path: 'maya',
-    adjustIndex: 0,
-    adjustPhase: 'one',
-    extraId: null,
-    pickedIds: [],
-    viewedExtraIds: [],
-    answers: [],
-    connectStep: 'partner',
-    partnerCheckin: null,
-    coachCheckin: null,
-    nextStepIds: [],
-    nextIndex: 0,
-    changes,
-    noteSentTo: null,
-    noteAwaitingReturn: null,
-    reached: 'look',
-  };
-}
-
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -51,15 +26,15 @@ function errorMessage(error: unknown): string {
 }
 
 export default function MayaHomeScreen({ navigation }: Props) {
-  const { user } = useAuth();
+  const tabBarHeight = useFloatingTabBarHeight();
   const { settings } = useSettings();
   const [name, setName] = useState('');
   const [reflected, setReflected] = useState(false);
   const [starting, setStarting] = useState(false);
 
   const targetWeek = useCallback(
-    () => reflectionTargetWeek(todayLocal(), settings.weekStart, settings.reflectionDay),
-    [settings.reflectionDay, settings.weekStart],
+    () => reflectOpenWeek(todayLocal(), settings.weekStart),
+    [settings.weekStart],
   );
 
   useFocusEffect(
@@ -72,7 +47,8 @@ export default function MayaHomeScreen({ navigation }: Props) {
           }
         })
         .catch(() => undefined);
-      void getReview(targetWeek())
+      void targetWeek()
+        .then((weekStart) => getReview(weekStart))
         .then((review) => {
           if (!cancelled) {
             setReflected(review != null);
@@ -93,20 +69,13 @@ export default function MayaHomeScreen({ navigation }: Props) {
     if (starting) {
       return;
     }
-    const weekStart = targetWeek();
+    const weekStart = await targetWeek();
     setStarting(true);
     try {
       const review = await getReview(weekStart);
       if (review) {
         setReflected(true);
         return;
-      }
-      if (user?.id) {
-        const draft = await getReflectionDraft(user.id, weekStart);
-        if (!draft || draft.section === 'choice') {
-          await saveReflectionDraft(user.id, weekStart, mayaStart(draft?.changes ?? []));
-          await saveReflectionPath(user.id, 'maya');
-        }
       }
       navigation.getParent()?.dispatch(
         CommonActions.navigate({
@@ -127,7 +96,7 @@ export default function MayaHomeScreen({ navigation }: Props) {
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingBottom: 16 + tabBarHeight }]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.bubbleRow}>

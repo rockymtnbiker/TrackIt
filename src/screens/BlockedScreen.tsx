@@ -1,5 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import {
   ActivityIndicator,
   Alert,
@@ -45,6 +46,7 @@ function blockedByMe(connection: Connection): boolean {
 }
 
 export default function BlockedScreen() {
+  const tabBarHeight = useFloatingTabBarHeight();
   const { refreshConnections } = useCommunity();
   const [blocked, setBlocked] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,7 +99,7 @@ export default function BlockedScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingBottom: 16 + tabBarHeight }]}>
       {loadError ? <Text style={styles.errorText}>{loadError}</Text> : null}
       {blocked.length === 0 ? (
         <Text style={styles.empty}>No one is blocked.</Text>

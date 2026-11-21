@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardSafe } from '../../components/KeyboardSafe';
 import { ONBOARDING_STEP_COUNT } from '../../constants/onboarding';
+import { useFloatingTabBarHeight } from '../../navigation/FloatingTabBar';
 
 export function OnboardingFrame({
   step,
@@ -20,11 +21,12 @@ export function OnboardingFrame({
   showProgress?: boolean;
 }) {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useFloatingTabBarHeight();
   const body = (
     <View
       style={[
         styles.screen,
-        { paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 12) },
+        { paddingTop: insets.top + 12, paddingBottom: Math.max(insets.bottom, 12) + tabBarHeight },
       ]}
     >
       <View style={styles.topBar}>

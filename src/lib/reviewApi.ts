@@ -1,8 +1,8 @@
 import { normalizeDateOnly } from './localDate';
-import { getActiveSettings } from './settingsApi';
+import { getActiveSettings, type WeekStart } from './settingsApi';
 import { awardBadges } from './badgeCelebration';
 import { supabase } from './supabase';
-import { startOfWeek } from './week';
+import { lastFullWeek, startOfWeek } from './week';
 
 const TABLE = 'weekly_reviews';
 const COLUMNS =
@@ -13,7 +13,17 @@ export type CoachCheckin = 'yes' | 'not_yet' | 'requested' | 'pending' | 'not_no
 
 export type GoalCheckin = {
   goal_id: string;
-  answer: string;
+  /** "Reflect on my own" stores the single answer id here. */
+  answer?: string;
+  /** Whole-number week percent. Null when the goal has no weekly count. */
+  week_pct?: number | null;
+  /** The target amount changed while this goal was open in the reflection. */
+  target_changed?: boolean;
+  /** What's next choice. Null when that step did not run. */
+  r3c?: string | null;
+  /** Older rows. New reflections do not write these. */
+  r3b?: string | null;
+  r3d?: string | null;
 };
 
 export type WeekReview = {
@@ -27,6 +37,10 @@ export type WeekReview = {
   goalCheckins: GoalCheckin[];
   partnerCheckin: PartnerCheckin | null;
   coachCheckin: CoachCheckin | null;
+  /** True when this row was saved from Reflect with Maya. */
+  maya: boolean;
+  /** Week start stored when the recap coach line was shown. */
+  coachLineShown: string | null;
   completedAt: string;
   updatedAt: string;
 };
@@ -74,12 +88,103 @@ function asCheckins(value: unknown): GoalCheckin[] {
     if (!item || typeof item !== 'object') {
       continue;
     }
-    const row = item as { goal_id?: unknown; answer?: unknown };
-    if (typeof row.goal_id === 'string' && typeof row.answer === 'string') {
-      checkins.push({ goal_id: row.goal_id, answer: row.answer });
+    const row = item as {
+      goal_id?: unknown;
+      answer?: unknown;
+      week_pct?: unknown;
+      target_changed?: unknown;
+      r3b?: unknown;
+      r3c?: unknown;
+      r3d?: unknown;
+    };
+    if (typeof row.goal_id !== 'string') {
+      continue;
     }
+    const checkin: GoalCheckin = { goal_id: row.goal_id };
+    if (typeof row.answer === 'string') {
+      checkin.answer = row.answer;
+    }
+    if (typeof row.week_pct === 'number' && Number.isFinite(row.week_pct)) {
+      checkin.week_pct = Math.round(row.week_pct);
+    } else if (row.week_pct === null) {
+      checkin.week_pct = null;
+    }
+    if (typeof row.target_changed === 'boolean') {
+      checkin.target_changed = row.target_changed;
+    }
+    if (typeof row.r3b === 'string' || row.r3b === null) {
+      checkin.r3b = row.r3b;
+    }
+    if (typeof row.r3c === 'string' || row.r3c === null) {
+      checkin.r3c = row.r3c;
+    }
+    if (typeof row.r3d === 'string' || row.r3d === null) {
+      checkin.r3d = row.r3d;
+    }
+    if (
+      checkin.answer == null &&
+      checkin.week_pct === undefined &&
+      checkin.target_changed === undefined &&
+      checkin.r3b === undefined &&
+      checkin.r3c === undefined &&
+      checkin.r3d === undefined
+    ) {
+      continue;
+    }
+    checkins.push(checkin);
   }
   return checkins;
+}
+
+/** Marker kept beside goal check-ins. No new column: goal_checkins is already JSON. */
+function asCoachLineMeta(value: unknown): { maya: boolean; coachLineShown: string | null } {
+  let maya = false;
+  let coachLineShown: string | null = null;
+  if (!Array.isArray(value)) {
+    return { maya, coachLineShown };
+  }
+  for (const item of value) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const row = item as {
+      maya?: unknown;
+      coach_line_shown?: unknown;
+      r3b?: unknown;
+      r3c?: unknown;
+      r3d?: unknown;
+    };
+    if (row.maya === true) {
+      maya = true;
+    }
+    if (typeof row.coach_line_shown === 'string' && row.coach_line_shown.trim()) {
+      coachLineShown = row.coach_line_shown.trim().slice(0, 10);
+    }
+    if (typeof row.r3b === 'string' || typeof row.r3c === 'string' || typeof row.r3d === 'string') {
+      maya = true;
+    }
+  }
+  return { maya, coachLineShown };
+}
+
+function goalCheckinsPayload(
+  checkins: GoalCheckin[],
+  maya: boolean,
+  coachLineShown: string | null,
+): unknown[] {
+  const rows: unknown[] = [...checkins];
+  if (!maya && !coachLineShown) {
+    return rows;
+  }
+  const marker: { maya?: true; coach_line_shown?: string } = {};
+  if (maya) {
+    marker.maya = true;
+  }
+  if (coachLineShown) {
+    marker.coach_line_shown = coachLineShown;
+  }
+  rows.push(marker);
+  return rows;
 }
 
 function weekStartKey(weekStart: string): string {
@@ -118,6 +223,7 @@ function mapRow(row: WeekReviewRow): WeekReview {
     goalCheckins: asCheckins(row.goal_checkins),
     partnerCheckin: asPartnerCheckin(row.partner_checkin),
     coachCheckin: asCoachCheckin(row.coach_checkin),
+    ...asCoachLineMeta(row.goal_checkins),
     completedAt: row.completed_at ?? '',
     updatedAt: row.updated_at ?? '',
   };
@@ -155,6 +261,13 @@ export async function getReviewWeeks(): Promise<string[]> {
     }
   }
   return weeks;
+}
+
+/** Last week when it has no reflection, otherwise the current week. */
+export async function reflectOpenWeek(today: string, weekStartsOn: WeekStart): Promise<string> {
+  const last = lastFullWeek(today, weekStartsOn);
+  const review = await getReview(last);
+  return review ? startOfWeek(today, weekStartsOn) : last;
 }
 
 export async function getReview(weekStart: string): Promise<WeekReview | null> {
@@ -228,6 +341,10 @@ export type ReflectionSaveInput = {
   goalCheckins: GoalCheckin[];
   partnerCheckin: PartnerCheckin | null;
   coachCheckin: CoachCheckin | null;
+  /** Reflect with Maya. Omitted for Reflect on my own. */
+  maya?: boolean;
+  /** Week the recap coach line was shown, when it was shown. */
+  coachLineShown?: string | null;
 };
 
 /** Saves a reflection onto the same weekly_reviews row, including the done percent snapshot. */
@@ -260,7 +377,11 @@ export async function saveReflection(input: ReflectionSaveInput): Promise<WeekRe
         rating: null,
         win: null,
         done_pct: donePct,
-        goal_checkins: input.goalCheckins,
+        goal_checkins: goalCheckinsPayload(
+          input.goalCheckins,
+          input.maya === true,
+          input.coachLineShown ?? null,
+        ),
         partner_checkin: input.partnerCheckin,
         coach_checkin: input.coachCheckin,
         completed_at: (existing as { completed_at: string | null } | null)?.completed_at ?? now,
@@ -286,6 +407,21 @@ export async function listReflections(limit = 8): Promise<WeekReview[]> {
     .eq('user_id', userId)
     .order('week_start', { ascending: false })
     .limit(limit);
+
+  if (error) {
+    throw error;
+  }
+  return ((data as WeekReviewRow[] | null) ?? []).map(mapRow);
+}
+
+/** Every saved reflection, oldest week first. Used for the recap coach line. */
+export async function listReflectionHistory(): Promise<WeekReview[]> {
+  const userId = await requireUserId();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select(COLUMNS)
+    .eq('user_id', userId)
+    .order('week_start', { ascending: true });
 
   if (error) {
     throw error;

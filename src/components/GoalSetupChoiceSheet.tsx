@@ -38,8 +38,11 @@ export function GoalSetupChoiceSheet({
   onCancel: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  if (!visible) {
+    return null;
+  }
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
+    <Modal visible transparent animationType="slide" onRequestClose={onCancel}>
       <View style={styles.overlay}>
         <Pressable
           style={styles.dismiss}

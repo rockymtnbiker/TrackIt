@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useState } from 'react';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import {
   ActivityIndicator,
   Alert,
@@ -132,6 +133,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export default function ProfileScreen({ navigation }: Props) {
+  const tabBarHeight = useFloatingTabBarHeight();
   const { user, signOut } = useAuth();
   const { settings, loading, updateSettings } = useSettings();
   const [signingOut, setSigningOut] = useState(false);
@@ -296,7 +298,7 @@ export default function ProfileScreen({ navigation }: Props) {
     <>
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingBottom: 32 + tabBarHeight }]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.headerCard}>

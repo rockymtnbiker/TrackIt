@@ -68,23 +68,27 @@ export function GoalReadout({
   nodes,
   entries,
   onSetTargetDate,
+  asOf,
 }: {
   node: Goal;
   nodes: Goal[];
   entries: GoalEntry[];
   onSetTargetDate?: () => void;
+  /** Period date for a repeating "N / T". Defaults to today. */
+  asOf?: string;
 }) {
   const { settings } = useSettings();
   const displayUnit = node.unit;
   const repeatOn = node.plannedDays !== null;
   const today = todayLocal();
+  const when = asOf ?? today;
   const total = displayUnit
     ? repeatOn
-      ? periodTotal(node, entries, today, settings.weekStart)
+      ? periodTotal(node, entries, when, settings.weekStart)
       : (rollupTotal(node, nodes, entries) ?? 0)
     : null;
   const amountTarget = repeatOn
-    ? periodTarget(node, today, settings.weekStart)
+    ? periodTarget(node, when, settings.weekStart)
     : node.targetAmount;
   const pace = displayUnit && !repeatOn ? paceInfo(node, total ?? 0, today) : null;
   const paceCopy = pace ? paceMessageFor(node, total ?? 0, pace, today) : null;

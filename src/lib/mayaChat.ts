@@ -9,6 +9,7 @@ import {
   type MayaStep,
 } from './mayaFlow';
 import { createJobDraft, submitJob, type JobDraft, type JobStepId } from './mayaJob';
+import { todayLocal } from './localDate';
 import {
   createShapeDraft,
   focusKey,
@@ -21,6 +22,12 @@ export type StepRef =
   | { kind: 'discover'; id: string }
   | { kind: 'shape'; id: ShapeStepId }
   | { kind: 'job'; id: JobStepId };
+
+type WalkSnap = {
+  answers: MayaAnswers;
+  draft: ShapeDraft | null;
+  job: JobDraft | null;
+};
 
 export type MayaWalk = {
   path: StepRef[];
@@ -35,11 +42,20 @@ export type MayaWalk = {
    * focus is reached again; dropped when the focus changes.
    */
   shapeHold: StepRef[];
+  /** Cursor to restore when a rewound question is answered the same way. */
+  resumeAt: number | null;
+  /** Chat state from the moment the user went back. */
+  anchor: WalkSnap | null;
+  /** State when each question was first shown, before that answer and later edits. */
+  arrived: WalkSnap[];
   action?: 'setup' | 'close' | 'save' | 'own';
 };
 
 export type WalkOptions = {
   ageKnown: boolean;
+  tempKnown: boolean;
+  /** Stored temperature, used when that question is skipped. */
+  temp: string | null;
   askLevel: boolean;
   level: MayaLevel;
 };
@@ -57,21 +73,31 @@ const BRANCH_IDS = new Set([
 const KEPT_ON_REJOIN = new Set(['better', 'want']);
 
 export function initialWalk(): MayaWalk {
-  return {
+  return land({
     path: [{ kind: 'discover', id: MAYA_DISCOVER.startId }],
     cursor: 0,
     answers: {},
     draft: null,
     job: null,
     shapeHold: [],
-  };
+    resumeAt: null,
+    anchor: null,
+    arrived: [],
+  });
 }
 
 export function rewindWalk(walk: MayaWalk, index: number): MayaWalk {
-  if (index < 0 || index > walk.cursor || index >= walk.path.length) {
+  if (index < 0 || index >= walk.cursor || index >= walk.path.length) {
     return walk;
   }
-  return { ...walk, cursor: index, shapeHold: [], action: undefined };
+  return {
+    ...walk,
+    cursor: index,
+    shapeHold: [],
+    action: undefined,
+    resumeAt: walk.resumeAt ?? walk.cursor,
+    anchor: walk.anchor ?? snapOf(walk),
+  };
 }
 
 /** Another job-flow goal starts again at the area question. Age and temperature stay. */
@@ -83,26 +109,38 @@ export function jobAnotherWalk(answers: MayaAnswers): MayaWalk {
   if (typeof answers.temp === 'string' && answers.temp) {
     kept.temp = answers.temp;
   }
-  return {
+  return land({
     path: [{ kind: 'discover', id: 'area' }],
     cursor: 0,
     answers: kept,
     draft: null,
     job: null,
     shapeHold: [],
-  };
+    resumeAt: null,
+    anchor: null,
+    arrived: [],
+  });
 }
 
 export function nextGoalWalk(answers: MayaAnswers): MayaWalk {
-  const age = answers.age;
-  return {
-    path: [{ kind: 'discover', id: 'temp' }],
+  const kept: MayaAnswers = {};
+  if (typeof answers.age === 'string' && answers.age) {
+    kept.age = answers.age;
+  }
+  if (typeof answers.temp === 'string' && answers.temp) {
+    kept.temp = answers.temp;
+  }
+  return land({
+    path: [{ kind: 'discover', id: kept.temp ? 'area' : 'temp' }],
     cursor: 0,
-    answers: typeof age === 'string' && age ? { age } : {},
+    answers: kept,
     draft: null,
     job: null,
     shapeHold: [],
-  };
+    resumeAt: null,
+    anchor: null,
+    arrived: [],
+  });
 }
 
 export function areaCommitted(walk: MayaWalk): boolean {
@@ -113,6 +151,9 @@ export function areaCommitted(walk: MayaWalk): boolean {
     return false;
   }
   const value = walk.answers[MAYA_DISCOVER.areaId];
+  if (typeof value === 'string') {
+    return value.length > 0;
+  }
   return Array.isArray(value) && value.length > 0;
 }
 
@@ -149,13 +190,17 @@ export function discoverAnswerLabel(id: string, answers: MayaAnswers): string {
   return options.find((option) => option.id === value)?.label ?? value;
 }
 
-/** Move past the question at the cursor, restoring later answers that still apply. */
+/** Move past the question at the cursor. A repeated answer keeps what followed; a new one starts over. */
 export function continueWalk(walk: MayaWalk, options: WalkOptions): MayaWalk {
   const current = walk.path[walk.cursor];
   if (!current || walk.cursor >= walk.path.length) {
     return walk;
   }
-  return advance({ ...walk, action: undefined }, options);
+  if (isRewind(walk) && answerUnchanged(walk)) {
+    return restoreRewind(walk);
+  }
+  const start = isRewind(walk) ? discardForward(walk, options) : { ...walk, action: undefined };
+  return advance(start, options);
 }
 
 function advance(start: MayaWalk, options: WalkOptions): MayaWalk {
@@ -167,15 +212,19 @@ function advance(start: MayaWalk, options: WalkOptions): MayaWalk {
   let job = start.job;
   let guard = 0;
 
-  const finish = (cursor: number, action?: MayaWalk['action']): MayaWalk => ({
-    path: [...path, ...tail],
-    cursor,
-    answers,
-    draft,
-    job,
-    shapeHold,
-    action,
-  });
+  const finish = (cursor: number, action?: MayaWalk['action']): MayaWalk =>
+    land({
+      path: [...path, ...tail],
+      cursor,
+      answers,
+      draft,
+      job,
+      shapeHold,
+      resumeAt: null,
+      anchor: null,
+      arrived: start.arrived,
+      action,
+    });
 
   while (guard < 40) {
     guard += 1;
@@ -203,7 +252,9 @@ function advance(start: MayaWalk, options: WalkOptions): MayaWalk {
     if (!node) {
       return finish(path.length - 1);
     }
-    const step = skipKnownAge(resolveNext(MAYA_DISCOVER, node, answers), options.ageKnown);
+    const skipped = skipKnown(resolveNext(MAYA_DISCOVER, node, answers), answers, options);
+    answers = skipped.answers;
+    const step = skipped.step;
     if (step.type === 'stay') {
       return finish(path.length - 1);
     }
@@ -215,17 +266,20 @@ function advance(start: MayaWalk, options: WalkOptions): MayaWalk {
     }
     if (step.type === 'shape') {
       const entered = beginShape(path, tail, shapeHold, answers, draft, options);
-      return {
+      return land({
         path: entered.path,
         cursor: entered.cursor,
         answers,
         draft: entered.draft,
         job,
         shapeHold: entered.shapeHold,
-      };
+        resumeAt: null,
+        anchor: null,
+        arrived: start.arrived,
+      });
     }
     if (step.type === 'node' && step.id === 'job-entry') {
-      return beginJob(path, answers, draft, options);
+      return beginJob(path, answers, draft, options, start.arrived);
     }
     if (step.type !== 'node') {
       return finish(path.length - 1);
@@ -468,16 +522,33 @@ function beginShape(
   };
 }
 
-function skipKnownAge(step: MayaStep, ageKnown: boolean): MayaStep {
-  if (!ageKnown || step.type !== 'node' || step.id !== 'age') {
-    return step;
+function skipKnown(
+  step: MayaStep,
+  answers: MayaAnswers,
+  options: WalkOptions,
+): { step: MayaStep; answers: MayaAnswers } {
+  let next = step;
+  let nextAnswers = answers;
+  if (options.ageKnown && next.type === 'node' && next.id === 'age') {
+    const age = nodeById(MAYA_DISCOVER, 'age');
+    if (age) {
+      const skipped = resolveNext(MAYA_DISCOVER, age, nextAnswers);
+      if (skipped.type !== 'stay') {
+        next = skipped;
+      }
+    }
   }
-  const age = nodeById(MAYA_DISCOVER, 'age');
-  if (!age) {
-    return step;
+  if (options.tempKnown && options.temp && next.type === 'node' && next.id === 'temp') {
+    nextAnswers = { ...nextAnswers, temp: options.temp };
+    const temp = nodeById(MAYA_DISCOVER, 'temp');
+    if (temp) {
+      const skipped = resolveNext(MAYA_DISCOVER, temp, nextAnswers);
+      if (skipped.type !== 'stay') {
+        next = skipped;
+      }
+    }
   }
-  const next = resolveNext(MAYA_DISCOVER, age, {});
-  return next.type === 'stay' ? step : next;
+  return { step: next, answers: nextAnswers };
 }
 
 function beginJob(
@@ -485,17 +556,21 @@ function beginJob(
   answers: MayaAnswers,
   draft: ShapeDraft | null,
   options: WalkOptions,
+  arrived: WalkSnap[],
 ): MayaWalk {
   const temp = typeof answers.temp === 'string' ? answers.temp : '';
   const nextPath: StepRef[] = [...path, { kind: 'job', id: 'why' }];
-  return {
+  return land({
     path: nextPath,
     cursor: nextPath.length - 1,
     answers,
     draft,
     job: createJobDraft(temp, options.level),
     shapeHold: [],
-  };
+    resumeAt: null,
+    anchor: null,
+    arrived,
+  });
 }
 
 /** Move one step in the Get a job flow. The patch is the answer just given. */
@@ -504,23 +579,32 @@ export function continueJob(walk: MayaWalk, patch: Partial<JobDraft>, options: W
   if (!step || step.kind !== 'job' || !walk.job) {
     return walk;
   }
-  const move = submitJob(walk.job, step.id, patch, options.askLevel);
+  const merged: JobDraft = { ...walk.job, ...patch };
+  if (isRewind(walk) && walk.anchor?.job && jobFieldsEqual(step.id, merged, walk.anchor.job)) {
+    return restoreRewind(walk);
+  }
+  const base = isRewind(walk) ? jobBase(walk, step.id, merged, options) : walk.job;
+  const move = submitJob(base, step.id, patch, options.askLevel);
+  const source = isRewind(walk) ? discardForward(walk, options) : walk;
   if (move.type === 'area') {
-    return leaveJobForArea(walk);
+    return leaveJobForArea(source);
   }
   const job = move.job;
   if (move.type === 'save' || move.type === 'own') {
-    return { ...walk, job, action: move.type };
+    return { ...source, job, action: move.type };
   }
-  const path = [...walk.path.slice(0, walk.cursor + 1), { kind: 'job' as const, id: move.id }];
-  return {
+  const path = [...source.path.slice(0, source.cursor + 1), { kind: 'job' as const, id: move.id }];
+  return land({
     path,
     cursor: path.length - 1,
-    answers: walk.answers,
-    draft: walk.draft,
+    answers: source.answers,
+    draft: source.draft,
     job,
     shapeHold: [],
-  };
+    resumeAt: null,
+    anchor: null,
+    arrived: source.arrived,
+  });
 }
 
 function leaveJobForArea(walk: MayaWalk): MayaWalk {
@@ -529,14 +613,214 @@ function leaveJobForArea(walk: MayaWalk): MayaWalk {
   const answers = { ...walk.answers };
   delete answers.area;
   delete answers.pickOne;
-  return {
+  return land({
     path,
     cursor: path.length - 1,
     answers,
     draft: null,
     job: null,
     shapeHold: [],
+    resumeAt: null,
+    anchor: null,
+    arrived: walk.arrived.slice(0, path.length),
+  });
+}
+
+const JOB_FIELDS: Record<JobStepId, (keyof JobDraft)[]> = {
+  why: ['why'],
+  importance: ['importance'],
+  importanceLow: ['lowChoice'],
+  stage: ['stage'],
+  date: ['dateChoice', 'targetDate'],
+  hours: ['hours', 'hoursConfirmed'],
+  tight: ['tightChoice'],
+  hold: ['follow'],
+  block: ['blockTime'],
+  start: ['startWith'],
+  coach: ['steps', 'stepsFor'],
+  card: ['title', 'targetDate', 'dateChoice', 'steps'],
+  helper: ['helper'],
+  invite: ['invite'],
+  helperLater: [],
+  level: ['level', 'levelChosen'],
+};
+
+const SHAPE_FIELDS: Record<ShapeStepId, (keyof ShapeDraft)[]> = {
+  coach: ['steps'],
+  name: ['title'],
+  habit: ['habitChoice', 'habitCustom', 'days', 'habitSkipped'],
+  helper: ['helper'],
+  level: ['level'],
+  summary: ['title', 'targetDate', 'steps', 'habitChoice', 'habitCustom', 'days', 'habitSkipped', 'helper'],
+};
+
+function isRewind(walk: MayaWalk): boolean {
+  return walk.resumeAt != null && walk.anchor != null && walk.resumeAt > walk.cursor;
+}
+
+function restoreRewind(walk: MayaWalk): MayaWalk {
+  return {
+    ...walk,
+    cursor: walk.resumeAt ?? walk.cursor,
+    resumeAt: null,
+    anchor: null,
+    action: undefined,
   };
+}
+
+function answerUnchanged(walk: MayaWalk): boolean {
+  const step = walk.path[walk.cursor];
+  const anchor = walk.anchor;
+  if (!step || !anchor) {
+    return false;
+  }
+  if (step.kind === 'discover') {
+    return sameValue(walk.answers[step.id], anchor.answers[step.id]);
+  }
+  if (step.kind === 'shape') {
+    return walk.draft != null && anchor.draft != null && shapeFieldsEqual(step.id, walk.draft, anchor.draft);
+  }
+  return walk.job != null && anchor.job != null && jobFieldsEqual(step.id, walk.job, anchor.job);
+}
+
+/** Drop the chat after the question being changed and rebuild what that question owns. */
+function discardForward(walk: MayaWalk, options: WalkOptions): MayaWalk {
+  const step = walk.path[walk.cursor];
+  const path = walk.path.slice(0, walk.cursor + 1);
+  const snap = walk.arrived[walk.cursor];
+  const answers = answersAfterChange(walk, path);
+  let draft: ShapeDraft | null = path.some((item) => item.kind === 'shape')
+    ? cloneDraft(snap?.draft ?? walk.draft)
+    : null;
+  const job = path.some((item) => item.kind === 'job') ? cloneJob(snap?.job ?? walk.job) : null;
+  if (step?.kind === 'shape' && walk.draft) {
+    draft = shapeBase(snap?.draft ?? null, walk.draft, step.id, answers, options);
+  }
+  return {
+    ...walk,
+    path,
+    answers,
+    draft,
+    job,
+    shapeHold: [],
+    resumeAt: null,
+    anchor: null,
+    arrived: walk.arrived.slice(0, path.length),
+    action: undefined,
+  };
+}
+
+function answersAfterChange(walk: MayaWalk, path: StepRef[]): MayaAnswers {
+  const step = path[path.length - 1];
+  const snap = walk.arrived[walk.cursor];
+  const answers: MayaAnswers = { ...(snap ? cloneAnswers(snap.answers) : {}) };
+  if (step?.kind === 'discover') {
+    const value = walk.answers[step.id];
+    if (value === undefined) {
+      delete answers[step.id];
+    } else {
+      answers[step.id] = cloneAnswer(value);
+    }
+  }
+  const kept = walk.anchor?.answers ?? walk.answers;
+  if (step?.kind !== 'discover' || step.id !== 'age') {
+    if (kept.age !== undefined) {
+      answers.age = kept.age;
+    }
+  }
+  if (step?.kind !== 'discover' || step.id !== 'temp') {
+    if (kept.temp !== undefined) {
+      answers.temp = kept.temp;
+    }
+  }
+  const ids = new Set(path.filter((item) => item.kind === 'discover').map((item) => item.id));
+  const next: MayaAnswers = {};
+  for (const [key, value] of Object.entries(answers)) {
+    if (ids.has(key) || key === 'age' || key === 'temp') {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
+function shapeBase(
+  snap: ShapeDraft | null,
+  live: ShapeDraft,
+  step: ShapeStepId,
+  answers: MayaAnswers,
+  options: WalkOptions,
+): ShapeDraft {
+  const base = snap ? cloneDraft(snap)! : createShapeDraft(answers, todayLocal(), options.level);
+  copyFields(base, live, SHAPE_FIELDS[step]);
+  return base;
+}
+
+function jobBase(walk: MayaWalk, step: JobStepId, merged: JobDraft, options: WalkOptions): JobDraft {
+  const snap = walk.arrived[walk.cursor]?.job ?? null;
+  if (!snap) {
+    return merged;
+  }
+  const temp = typeof walk.answers.temp === 'string' ? walk.answers.temp : '';
+  const base = cloneJob(snap) ?? createJobDraft(temp, options.level);
+  copyFields(base, merged, JOB_FIELDS[step]);
+  return base;
+}
+
+function jobFieldsEqual(step: JobStepId, left: JobDraft, right: JobDraft): boolean {
+  return fieldsEqual(JOB_FIELDS[step], left, right);
+}
+
+function shapeFieldsEqual(step: ShapeStepId, left: ShapeDraft, right: ShapeDraft): boolean {
+  return fieldsEqual(SHAPE_FIELDS[step], left, right);
+}
+
+function fieldsEqual<T>(fields: (keyof T)[], left: T, right: T): boolean {
+  return fields.every((field) => JSON.stringify(left[field] ?? null) === JSON.stringify(right[field] ?? null));
+}
+
+function copyFields<T>(target: T, source: T, fields: (keyof T)[]): void {
+  for (const field of fields) {
+    const value = source[field];
+    target[field] = (
+      value != null && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value
+    ) as T[keyof T];
+  }
+}
+
+function land(walk: MayaWalk): MayaWalk {
+  const arrived = walk.arrived.slice();
+  if (!arrived[walk.cursor]) {
+    arrived[walk.cursor] = snapOf(walk);
+  }
+  return { ...walk, arrived };
+}
+
+function snapOf(walk: MayaWalk): WalkSnap {
+  return {
+    answers: cloneAnswers(walk.answers),
+    draft: cloneDraft(walk.draft),
+    job: cloneJob(walk.job),
+  };
+}
+
+function cloneAnswers(answers: MayaAnswers): MayaAnswers {
+  return JSON.parse(JSON.stringify(answers)) as MayaAnswers;
+}
+
+function cloneAnswer(value: MayaAnswers[string]): MayaAnswers[string] {
+  return JSON.parse(JSON.stringify(value)) as MayaAnswers[string];
+}
+
+function cloneDraft(draft: ShapeDraft | null): ShapeDraft | null {
+  return draft ? (JSON.parse(JSON.stringify(draft)) as ShapeDraft) : null;
+}
+
+function cloneJob(job: JobDraft | null): JobDraft | null {
+  return job ? (JSON.parse(JSON.stringify(job)) as JobDraft) : null;
+}
+
+function sameValue(left: MayaAnswers[string] | undefined, right: MayaAnswers[string] | undefined): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
 export function currentDiscoverNode(walk: MayaWalk): MayaNode | null {

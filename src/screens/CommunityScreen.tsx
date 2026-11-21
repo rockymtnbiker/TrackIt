@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { FormFieldRow, FormInlineInput } from '../components/FormFields';
 import { PageHeader } from '../components/PageHeader';
 import { FeedbackSheet } from '../components/FeedbackSheet';
+import { CreateGroupSheet, GroupAgeSheet, JoinGroupSheet } from '../components/GroupSheets';
 import { InviteCodeSheet, RedeemInviteSheet } from '../components/InviteCodeSheet';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { WhatsComing } from '../components/WhatsComing';
@@ -29,6 +30,8 @@ import {
   sendPartnerInvite,
 } from '../lib/communityApi';
 import { getGoal } from '../lib/goalTreeApi';
+import { groupErrorMessage, listMyGroups, type MyGroup } from '../lib/groupsApi';
+import { getStoredAgeRange, isUnder13 } from '../lib/profileApi';
 import {
   cancelInvite as cancelCodeInvite,
   listMyPendingInvites,
@@ -37,6 +40,7 @@ import {
 } from '../lib/invitesApi';
 import type { ConnectionSummary } from '../lib/messagesApi';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import type { Connection } from '../types/community';
 import { formatDate } from '../utils/date';
 
@@ -167,6 +171,7 @@ function roleLabel(role: Connection['role']): string {
 }
 
 export default function CommunityScreen({ navigation, route }: Props) {
+  const tabBarHeight = useFloatingTabBarHeight();
   const { user } = useAuth();
   const { openCoachRequest } = useCoachRequest();
   const { refreshConnections, summaries } = useCommunity();
@@ -184,6 +189,12 @@ export default function CommunityScreen({ navigation, route }: Props) {
   const [codeSheet, setCodeSheet] = useState<CodeSheetRequest | null>(null);
   const [redeemOpen, setRedeemOpen] = useState(false);
   const [inviteMenu, setInviteMenu] = useState(false);
+  const [groups, setGroups] = useState<MyGroup[]>([]);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [joinGroupOpen, setJoinGroupOpen] = useState(false);
+  const [ageOpen, setAgeOpen] = useState(false);
+  const afterAge = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (route.params?.openInvite !== true) {
@@ -241,11 +252,41 @@ export default function CommunityScreen({ navigation, route }: Props) {
     }
   }, []);
 
+  const loadGroups = useCallback(async () => {
+    try {
+      setGroups(await listMyGroups());
+      setGroupsError(null);
+    } catch (error) {
+      setGroupsError(groupErrorMessage(error, 'Could not load groups.'));
+    }
+  }, []);
+
+  const startGroupAction = (action: () => void) => {
+    void (async () => {
+      try {
+        const age = await getStoredAgeRange();
+        if (isUnder13(age)) {
+          Alert.alert('Groups are for ages 13 and up.');
+          return;
+        }
+        if (!age) {
+          afterAge.current = action;
+          setAgeOpen(true);
+          return;
+        }
+        action();
+      } catch (error) {
+        Alert.alert('Could not check your age range', groupErrorMessage(error, 'Try again.'));
+      }
+    })();
+  };
+
   useFocusEffect(
     useCallback(() => {
       void load();
       void loadCodes();
-    }, [load, loadCodes]),
+      void loadGroups();
+    }, [load, loadCodes, loadGroups]),
   );
 
   const visible = connections.filter((connection) => !hiddenFromMe(connection));
@@ -385,7 +426,7 @@ export default function CommunityScreen({ navigation, route }: Props) {
       />
       <ScrollView
         style={styles.screen}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: 32 + tabBarHeight }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -393,6 +434,7 @@ export default function CommunityScreen({ navigation, route }: Props) {
               setRefreshing(true);
               void load();
               void loadCodes();
+              void loadGroups();
             }}
             tintColor="#007aff"
           />
@@ -615,20 +657,46 @@ export default function CommunityScreen({ navigation, route }: Props) {
         ) : null}
 
         <Text style={styles.section}>Groups</Text>
+        {groupsError ? <Text style={styles.errorText}>{groupsError}</Text> : null}
         <View style={styles.card}>
+          {groups.length === 0 ? (
+            <Text style={styles.partnerEmpty}>Create a group to work on goals together.</Text>
+          ) : (
+            groups.map((group, index) => (
+              <View key={group.id}>
+                {index > 0 ? <View style={styles.separator} /> : null}
+                <Pressable
+                  onPress={() => navigation.navigate('Group', { groupId: group.id })}
+                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${group.name}, ${group.memberCount} members`}
+                >
+                  <View style={styles.actionText}>
+                    <Text style={styles.rowLabel}>{group.name}</Text>
+                    <Text style={styles.actionBody}>{group.memberCount} members</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+                </Pressable>
+              </View>
+            ))
+          )}
+          {groups.length > 0 ? <View style={styles.separator} /> : null}
           <Pressable
-            onPress={() => navigation.navigate('GroupsInterest')}
+            onPress={() => startGroupAction(() => setCreateGroupOpen(true))}
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="Create a group"
           >
-            <View style={styles.actionText}>
-              <Text style={styles.rowLabel}>Create a group</Text>
-              <Text style={styles.actionBody}>
-                A team, friend group, or family where you can share group goals and individual goals in one place.
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#c7c7cc" />
+            <Text style={styles.inviteButtonText}>Create a group</Text>
+          </Pressable>
+          <View style={styles.separator} />
+          <Pressable
+            onPress={() => startGroupAction(() => setJoinGroupOpen(true))}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Have an invite code?"
+          >
+            <Text style={styles.inviteButtonText}>Have an invite code?</Text>
           </Pressable>
         </View>
 
@@ -759,6 +827,43 @@ export default function CommunityScreen({ navigation, route }: Props) {
           }}
         />
       ) : null}
+      <GroupAgeSheet
+        visible={ageOpen}
+        onClose={() => {
+          afterAge.current = null;
+          setAgeOpen(false);
+        }}
+        onSaved={() => {
+          const next = afterAge.current;
+          afterAge.current = null;
+          setAgeOpen(false);
+          next?.();
+        }}
+      />
+      <CreateGroupSheet
+        visible={createGroupOpen}
+        onClose={() => {
+          setCreateGroupOpen(false);
+          void loadGroups();
+        }}
+        onDone={(group) => {
+          setCreateGroupOpen(false);
+          void loadGroups();
+          navigation.navigate('Group', { groupId: group.id });
+        }}
+      />
+      <JoinGroupSheet
+        visible={joinGroupOpen}
+        onClose={() => {
+          setJoinGroupOpen(false);
+          void loadGroups();
+        }}
+        onOpen={(groupId) => {
+          setJoinGroupOpen(false);
+          void loadGroups();
+          navigation.navigate('Group', { groupId });
+        }}
+      />
     </View>
   );
 }

@@ -11,11 +11,13 @@ import {
 } from 'react-native';
 import { LegacyScrollView as ScrollView, Pressable } from 'react-native-gesture-handler';
 import { AREA_ICONS } from '../constants/areaIcons';
+import { GroupGoalTag, useGroupGoalLabels } from '../components/GroupGoalTag';
 import { DraggableItem } from '../components/DraggableItem';
 import {
   FLOATING_ADD_BUTTON_CLEARANCE,
   FloatingAddButton,
 } from '../components/FloatingAddButton';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import { DatePickerModal } from '../components/DatePickerModal';
 import { GoalSetupChoiceSheet } from '../components/GoalSetupChoiceSheet';
 import { PageHeader } from '../components/PageHeader';
@@ -112,11 +114,13 @@ function cardSubtitle(
 }
 
 export default function GoalsListScreen({ navigation }: Props) {
+  const tabBarHeight = useFloatingTabBarHeight();
   const { user } = useAuth();
   const [choiceOpen, setChoiceOpen] = useState(false);
   const [setupChoice, setSetupChoice] = useState<GoalSetupChoice | null>(null);
   const { settings } = useSettings();
   const [nodes, setNodes] = useState<Goal[]>([]);
+  const groupLabels = useGroupGoalLabels(nodes.map((node) => node.groupGoalId));
   const [entries, setEntries] = useState<GoalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -286,7 +290,10 @@ export default function GoalsListScreen({ navigation }: Props) {
       )}
       <View style={styles.listHost}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: 12 + FLOATING_ADD_BUTTON_CLEARANCE + tabBarHeight },
+        ]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         // Legacy scroll view, not the v3 one. The v3 ScrollView attaches an
@@ -358,6 +365,9 @@ export default function GoalsListScreen({ navigation }: Props) {
                     <Text style={styles.cardTitle} numberOfLines={1}>
                       {node.title || 'Untitled'}
                     </Text>
+                    {node.groupGoalId && groupLabels.get(node.groupGoalId) ? (
+                      <GroupGoalTag name={groupLabels.get(node.groupGoalId)?.name ?? ''} />
+                    ) : null}
                     {isRepeating(node) ? (
                       <Ionicons
                         name="repeat"

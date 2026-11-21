@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LEARN_ITEMS, type LearnItem, type LearnTab } from '../constants/learn';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 
 type Props = {
   navigation: {
@@ -22,6 +23,7 @@ function openItem(
 }
 
 export default function LearnScreen({ navigation, route }: Props) {
+  const tabBarHeight = useFloatingTabBarHeight();
   const tab = route.params?.tab;
   const sections = tab
     ? [
@@ -38,7 +40,10 @@ export default function LearnScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.screen}>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={[styles.content, { paddingBottom: 32 + tabBarHeight }]}
+      >
         <Text style={styles.placeholder}>Placeholder: more topics and videos are coming.</Text>
         {sections.map((section) =>
           section.items.length === 0 ? null : (

@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFloatingTabBarHeight } from '../navigation/FloatingTabBar';
 import { KeyboardSafe } from '../components/KeyboardSafe';
 import { PartnerGoalsView } from '../components/PartnerGoalsView';
 import { showActionSheet } from '../components/showActionSheet';
@@ -32,7 +33,6 @@ import {
   sendMessage,
   type ChatMessage,
 } from '../lib/messagesApi';
-import { markReflectionNoteSent } from '../lib/reflectionNote';
 import type { CommunityStackParamList } from '../navigation/CommunityStackNavigator';
 import type { Goal } from '../types/goal';
 import { addDays } from '../utils/date';
@@ -128,6 +128,7 @@ export default function ChatScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const { clearUnread } = useCommunity();
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useFloatingTabBarHeight();
   const listRef = useRef<FlatList<ChatRow>>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const newestIdRef = useRef<string | null>(null);
@@ -456,7 +457,6 @@ export default function ChatScreen({ navigation, route }: Props) {
     try {
       const saved = await sendMessage(connectionId, text, tagGoalId);
       if (fromReflection) {
-        markReflectionNoteSent(otherName);
         navigation.goBack();
         return;
       }
@@ -729,7 +729,7 @@ export default function ChatScreen({ navigation, route }: Props) {
           <View
             style={[
               styles.composer,
-              { paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 8) },
+              { paddingBottom: keyboardOpen ? 8 : Math.max(insets.bottom, 8) + tabBarHeight },
             ]}
           >
             <TextInput
